@@ -180,6 +180,7 @@ class GAN(BaseModel):
         return parent_parser
 
     def generation(self, batch):
+        #cropz
         z_init = np.random.randint(7)
         batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
         batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
