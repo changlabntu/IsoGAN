@@ -191,24 +191,19 @@ class GAN(BaseModel):
         self.oriX = batch['img'][0]
         self.oriY = batch['img'][1]
 
-        # decaying skip connection
-        if self.hparams.alpha > 0:  # if decaying
-            alpha = 1 - self.epoch / self.hparams.alpha
-            if alpha < 0:
-                alpha = 0
-        else:
-            alpha = 0  # if always disconnected
+        # skip connection
+        alpha = self.hparams.alpha
 
         # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
-        outXz = self.net_g(self.oriX, alpha=1, method='encode')
-        outX = self.net_g(outXz, alpha=1, method='decode')
-        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
-        self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
+        outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
+        outX = self.net_g(outXz, alpha=alpha, method='decode')
+        self.imgXY = nn.Tanh()(outX['out0'])  # mask 0 - 1
+        #self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
 
         #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
-        outY = self.net_gY(outYz, alpha=alpha, method='decode')
-        self.imgYY = nn.Tanh()(outY['out0'])  # -1 ~ 1, real img
+        #outY = self.net_gY(outYz, alpha=alpha, method='decode')
+        #self.imgYY = nn.Tanh()(outY['out0'])  # -1 ~ 1, real img
 
         # global contrastive
         # use last layer
@@ -236,11 +231,11 @@ class GAN(BaseModel):
         # L1(XY, Y)
         loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
 
-        loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
+        #loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
 
         loss_ga = axy  # * 0.5 + axx * 0.5
 
-        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb + loss_l1Y * self.hparams.lamb
+        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb #+ loss_l1Y * self.hparams.lamb
 
         if self.hparams.lbvgg > 0:
             loss_gvgg = self.VGGloss(torch.cat([self.imgXY] * 3, 1), torch.cat([self.oriY] * 3, 1))
@@ -266,23 +261,24 @@ class GAN(BaseModel):
                 loss = crit(f_q, f_k) * f_w
                 total_nce_loss += loss.mean()
             loss_nce = total_nce_loss / 4
-            loss_g += loss_nce * self.hparams.lbNCE
-            loss_dict['loss_nce'] = loss_nce
         else:
             loss_nce = 0
 
+        loss_g += loss_nce * self.hparams.lbNCE
+
+        loss_dict['loss_nce'] = loss_nce
         loss_dict['loss_l1'] = loss_l1
-        loss_dict['loss_l1Y'] = loss_l1Y
+        #loss_dict['loss_l1Y'] = loss_l1Y
 
         # global contrastive
         loss_t = 0
         loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
         loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
-        loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
-        loss_g += loss_t + loss_center
+        #loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
+        loss_g += loss_t #+ loss_center
 
         loss_dict['loss_t'] = loss_t
-        loss_dict['loss_center'] = loss_center
+        #loss_dict['loss_center'] = loss_center
 
         loss_dict['sum'] = loss_g
 

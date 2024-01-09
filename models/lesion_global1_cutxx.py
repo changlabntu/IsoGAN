@@ -201,14 +201,8 @@ class GAN(BaseModel):
 
         # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
         outXz = self.net_g(self.oriX, alpha=1, method='encode')
-        outX = self.net_g(outXz, alpha=1, method='decode')
-        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
-        self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
-
         #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
-        outY = self.net_gY(outYz, alpha=alpha, method='decode')
-        self.imgYY = nn.Tanh()(outY['out0'])  # -1 ~ 1, real img
 
         # global contrastive
         # use last layer
@@ -230,50 +224,6 @@ class GAN(BaseModel):
 
     def backward_g(self):
         loss_dict = dict()
-
-        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
-
-        # L1(XY, Y)
-        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
-
-        loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
-
-        loss_ga = axy  # * 0.5 + axx * 0.5
-
-        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb + loss_l1Y * self.hparams.lamb
-
-        if self.hparams.lbvgg > 0:
-            loss_gvgg = self.VGGloss(torch.cat([self.imgXY] * 3, 1), torch.cat([self.oriY] * 3, 1))
-            loss_g += loss_gvgg * self.hparams.lbvgg
-        else:
-            loss_gvgg = 0
-
-        # CUT NCE_loss
-        if self.hparams.lbNCE > 0:
-            # (Y, YY) (XY, YY) (Y, XY)
-            feat_q = self.net_g(self.oriY, method='encode')
-            feat_k = self.net_g(self.imgXY, method='encode')
-
-            feat_q = [self.featDown(f) for f in feat_q]
-            feat_k = [self.featDown(f) for f in feat_k]
-
-            feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
-                                                None)  # get source patches by random id
-            feat_q_pool, _ = self.netF(feat_q, self.hparams.num_patches, sample_ids)  # use the ids for query target
-
-            total_nce_loss = 0.0
-            for f_q, f_k, crit, f_w in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.hparams.fWhich):
-                loss = crit(f_q, f_k) * f_w
-                total_nce_loss += loss.mean()
-            loss_nce = total_nce_loss / 4
-            loss_g += loss_nce * self.hparams.lbNCE
-            loss_dict['loss_nce'] = loss_nce
-        else:
-            loss_nce = 0
-
-        loss_dict['loss_l1'] = loss_l1
-        loss_dict['loss_l1Y'] = loss_l1Y
-
         # global contrastive
         loss_t = 0
         loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
@@ -283,25 +233,12 @@ class GAN(BaseModel):
 
         loss_dict['loss_t'] = loss_t
         loss_dict['loss_center'] = loss_center
-
         loss_dict['sum'] = loss_g
 
         return loss_dict
 
     def backward_d(self):
-        # ADV(XY)-
-        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
-
-        # ADV(XX)-
-        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
-        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
-
-        # adversarial of xy (-) and y (+)
-        loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
-        # classify x (+) vs y (-)
-        loss_d = loss_da * self.hparams.adv
-
-        return {'sum': loss_d, 'da': loss_da}
+        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
 
 
 # python train.py --alpha 0 --jsn womac4 --prj global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16/ --models lesion_global1_cut1 --netG edalphand --split moaks --dataset womac4 --lbvgg 0 --lbNCE 4 --nm 01 --fDown 4 --use_mlp --fWhich 0 0 1 1 -b 2 --ngf 32 --projection 32 --env runpod --n_epochs 200 --lr_policy cosine
