@@ -192,15 +192,10 @@ class GAN(BaseModel):
         self.oriY = batch['img'][1]
 
         # decaying skip connection
-        if self.hparams.alpha > 0:  # if decaying
-            alpha = 1 - self.epoch / self.hparams.alpha
-            if alpha < 0:
-                alpha = 0
-        else:
-            alpha = 0  # if always disconnected
+        alpha = 0  # if always disconnected
 
-        # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
-        outXz = self.net_g(self.oriX, alpha=1, method='encode')
+        # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
+        outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
         #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
 
@@ -223,7 +218,9 @@ class GAN(BaseModel):
             self.outYz = self.net_g.projection(self.outYz)
 
     def backward_g(self):
+        loss_g = 0
         loss_dict = dict()
+
         # global contrastive
         loss_t = 0
         loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])

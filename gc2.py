@@ -32,7 +32,7 @@ def get_features(alist, N):
         ax = ax.unsqueeze(1)
         if gpu:
             ax = ax.cuda()
-        ax = net(ax, alpha=1, method='encode')[-1].detach().cpu()
+        ax = net(ax, alpha=0, method='encode')[-1].detach().cpu()
         ax = ax.permute(1, 2, 3, 0).unsqueeze(0)
         ax = pool(ax)[:, :, 0, 0, 0]
         if (projection is not None) and not force_no_projection:
@@ -127,14 +127,17 @@ df.reset_index(inplace=True)
 # prj_name = 'global1_cut1/nce4_down2_0011_ngf24_proj128/' # 0.81
 #prj_name = 'global1_cut1/nce4_down2_0011_ngf32_proj128_zcrop16_meanpool/' # bad
 # prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16/' # 0.92
-prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16_moaks/' # 0.936
+#prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16_moaks/' # 0.936
 # prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16_unpaired/' # 0.857
 # prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16_unpaired_nce0/' # 0.857
 # prj_name = 'global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16_unpaired_moaks/'  # 0.914
-#prj_name = 'global1_cutx2/nce0_down4_0011_ngf32_proj32_zcrop16_unpaired_moaks/'  #
+#prj_name = 'global1_cut1/nce0_down4_0011_ngf32_proj32_zcrop16_unpaired/'  # 0.914
 
-force_no_projection = True  # force to not use projection, or it will be used if .projection is in a model
-use_eval = True
+prj_name = 'global1_cut2/0/'  #
+#prj_name = 'global1_cutxx/contrastive_classify_try2/'  #
+
+force_no_projection = False  # force to not use projection, or it will be used if .projection is in a model
+use_eval = False
 
 net = torch.load(log_root + prj_name + 'checkpoints/net_g_model_epoch_' + str(n_epoch) + '.pth', map_location='cpu')
 
@@ -152,13 +155,13 @@ print('go')
 
 if use_eval:
     net = net.eval()
-    net.projection = net.projection.eval()
+    #net.projection = net.projection.eval()
 else:
     net = net.train()
-    net.projection = net.projection.train()
+    #net.projection = net.projection.train()
 
 # %%
-selected = 1000*23
+selected = 2225*23
 alist = sorted(glob.glob(data_root + 'a/*'))[:selected]
 blist = sorted(glob.glob(data_root + 'b/*'))[:selected]
 clist = sorted(glob.glob(data_root + 'cf3/*'))
@@ -170,10 +173,10 @@ all = np.concatenate([af, bf], 0)
 
 # indicies and labels
 L = (all.shape[0] // 2)
-train_index = list((df.loc[:(L-1), :]).loc[df['READPRJ'].isnull(), :].index)[:]
-test_index = list((df.loc[:(L-1), :]).loc[df['READPRJ'].notnull(), :].index)[:]
-#train_index = list(range(667, 2225))
-#test_index = list(range(667))
+#train_index = list((df.loc[:(L-1), :]).loc[df['READPRJ'].isnull(), :].index)[:]
+#test_index = list((df.loc[:(L-1), :]).loc[df['READPRJ'].notnull(), :].index)[:]
+train_index = list(range(667, 2225))
+test_index = list(range(667))
 train_index = train_index + [L + x for x in train_index]#[2 * x for x in train_index] + [2 * x + 1 for x in train_index]
 test_index = test_index + [L + x for x in test_index]#[2 * x for x in test_index] + [2 * x + 1 for x in test_index]
 labels = np.array([-1] * L + [1] * L)
@@ -211,9 +214,13 @@ c_pred = clf.predict_proba(cf3)[:,1]
 a_pred = clf.predict_proba(af)[:,1]
 b_pred = clf.predict_proba(bf)[:,1]
 
+print('b_pred - a_pred')
 print((b_pred-a_pred).mean())
+print('(c_pred-a_pred[:50])')
 print((c_pred-a_pred[:50]).mean())
+print('(b_pred-a_pred[:50])')
 print((b_pred[:50]-a_pred[:50]).mean())
+print('flip rate :50')
 print((c_pred > 0.5).mean())
 
 
@@ -275,7 +282,7 @@ def get_image(alist, N):
     all = all.numpy()
     return all
 
-
+# misc
 cfall = [get_features2([x],1) for x in blist[23:46]]
 cp2 = [clf.predict_proba(x)[:,1] for x in cfall]
 print(np.array(cp2).mean())
@@ -283,3 +290,12 @@ print(np.array(cp2).mean())
 cfall = [get_features2(clist[23:46],1)]
 cp2 = [clf.predict_proba(x)[:,1] for x in cfall]
 print(cp2)
+
+# umap
+e0 = reducer.fit_transform(all)
+e = e0#[:23*5*2, :]
+plt.scatter(e[:L, 0], e[:L, 1], s=0.5*np.ones(e.shape[0] // 2))
+plt.scatter(e[L:, 0], e[L:, 1], s=0.5*np.ones(e.shape[0] // 2))
+plt.show()
+
+
