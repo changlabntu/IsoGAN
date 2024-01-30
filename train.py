@@ -102,6 +102,7 @@ if __name__ == '__main__':
         t_args.__dict__.update(json.load(f)['train'])
         args = parser.parse_args(namespace=t_args)
 
+
     # environment file
     if args.env is not None:
         load_dotenv('env/.' + args.env)

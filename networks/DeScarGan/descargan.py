@@ -59,6 +59,21 @@ def deconv2d_bn_block(in_channels, out_channels, use_upsample=True, kernel=4, st
     )
 
 
+def deconv2d_block(in_channels, out_channels, use_upsample=True, kernel=4, stride=2, padding=1, momentum=0.01,
+                      activation=ACTIVATION):
+    if use_upsample:
+        up = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1)
+        )
+    else:
+        up = nn.ConvTranspose2d(in_channels, out_channels, kernel, stride=stride, padding=padding)
+    return nn.Sequential(
+        up,
+        activation(),
+    )
+
+
 def dense_layer_bn(in_dim, out_dim, momentum=0.01, activation=ACTIVATION):
     return nn.Sequential(
         nn.Linear(in_dim, out_dim),

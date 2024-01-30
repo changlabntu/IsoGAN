@@ -181,9 +181,9 @@ class GAN(BaseModel):
 
     def generation(self, batch):
         #cropz
-        z_init = np.random.randint(7)
-        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
-        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
+        z_init = np.random.randint(9)
+        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 14]
+        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 14]
 
         if self.hparams.load3d:  # if working on 3D input, bring the Z dimension to the first and combine with batch
             batch['img'] = reshape_3d(batch['img'])
@@ -191,17 +191,24 @@ class GAN(BaseModel):
         self.oriX = batch['img'][0]
         self.oriY = batch['img'][1]
 
+        # decaying skip connection
+        if self.hparams.alpha > 0:  # if decaying
+            alpha = 1 - self.epoch / self.hparams.alpha
+            if alpha < 0:
+                alpha = 0
+        else:
+            alpha = 0  # if always disconnected
+
         # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
-        outXz = self.net_g(self.oriX, alpha=0, method='encode')
-        outX = self.net_g(outXz, alpha=0, method='decode')
+        outXz = self.net_g(self.oriX, alpha=1, method='encode')
+        outX = self.net_g(outXz, alpha=1, method='decode')
         self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
         self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
 
         #
         outYz = self.net_g(self.oriY, alpha=0, method='encode')
         outY = self.net_gY(outYz, alpha=0, method='decode')
-        self.imgYY = nn.Sigmoid()(outY['out0'])  # mask 0 - 1
-        self.imgYY = combine(self.imgYY, self.oriY, method='mul')  # i am using masking (0-1) here
+        self.imgYY = nn.Tanh()(outY['out0'])  # -1 ~ 1, real img
 
         # global contrastive
         # use last layer
@@ -210,7 +217,16 @@ class GAN(BaseModel):
         self.outXz = self.classify(self.outXz)
         self.outYz = self.classify(self.outYz)
 
+        # extra
+        imgXYz = self.net_g(self.imgXY, alpha=1, method='encode')
+        self.imgXYz = imgXYz[-1]
+        self.imgXYz = self.classify(self.imgXYz)
+        imgYYz = self.net_g(self.imgYY, alpha=1, method='encode')
+        self.imgYYz = imgYYz[-1]
+        self.imgYYz = self.classify(self.imgYYz)
+
     def classify(self, f):
+        # this is for the knee (Z, C, X, Y), you may need to change it
         (B, C, X, Y) = f.shape
         f = f.view(B//self.batch, self.batch, C, X, Y)
         f = f.permute(1, 2, 3, 4, 0)
@@ -222,7 +238,6 @@ class GAN(BaseModel):
     def backward_g(self):
         loss_dict = dict()
 
-        # adversarial
         axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
         ayy = self.add_loss_adv(a=self.imgYY, net_d=self.net_d, truth=True)
 
@@ -235,8 +250,37 @@ class GAN(BaseModel):
 
         loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb + loss_l1Y * self.hparams.lamb
 
-        loss_dict['loss_l1'] = loss_l1
-        loss_dict['loss_l1Y'] = loss_l1Y
+        if self.hparams.lbvgg > 0:
+            loss_gvgg = self.VGGloss(torch.cat([self.imgXY] * 3, 1), torch.cat([self.oriY] * 3, 1))
+            loss_g += loss_gvgg * self.hparams.lbvgg
+        else:
+            loss_gvgg = 0
+
+        # CUT NCE_loss
+        if self.hparams.lbNCE > 0:
+            # (Y, YY) (XY, YY) (Y, XY)
+            feat_q = self.net_g(self.oriY, method='encode')
+            feat_k = self.net_g(self.imgXY, method='encode')
+
+            feat_q = [self.featDown(f) for f in feat_q]
+            feat_k = [self.featDown(f) for f in feat_k]
+
+            feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
+                                                None)  # get source patches by random id
+            feat_q_pool, _ = self.netF(feat_q, self.hparams.num_patches, sample_ids)  # use the ids for query target
+
+            total_nce_loss = 0.0
+            for f_q, f_k, crit, f_w in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.hparams.fWhich):
+                loss = crit(f_q, f_k) * f_w
+                total_nce_loss += loss.mean()
+            loss_nce = total_nce_loss / 4
+            loss_g += loss_nce * self.hparams.lbNCE
+            loss_dict['nce'] = loss_nce
+        else:
+            loss_nce = 0
+
+        loss_dict['l1'] = loss_l1
+        loss_dict['l1Y'] = loss_l1Y
 
         # global contrastive
         loss_t = 0
@@ -245,8 +289,8 @@ class GAN(BaseModel):
         loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
         loss_g += loss_t + loss_center
 
-        loss_dict['loss_t'] = loss_t
-        loss_dict['loss_center'] = loss_center
+        loss_dict['t'] = loss_t
+        loss_dict['center'] = loss_center
 
         loss_dict['sum'] = loss_g
 
@@ -255,13 +299,14 @@ class GAN(BaseModel):
     def backward_d(self):
         # ADV(XY)-
         axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
-        # ADV(Y)+
-        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
-        # ADV(YY)-
         ayy = self.add_loss_adv(a=self.imgYY.detach(), net_d=self.net_d, truth=False)
 
+        # ADV(XX)-
+        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
+        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
+
         # adversarial of xy (-) and y (+)
-        loss_da = axy * 0.25 + ay * 0.5 + ayy * 0.25 #+ axx * 0.25 + ax * 0.25 + ay * 0.25
+        loss_da = axy * 0.25 + ay * 0.5 + ayy * 0.25  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
         # classify x (+) vs y (-)
         loss_d = loss_da * self.hparams.adv
 
