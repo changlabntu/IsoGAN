@@ -132,7 +132,7 @@ class BaseModel(pl.LightningModule):
 
         # Final
         self.hparams.update(vars(self.hparams))   # updated hparams to be logged in tensorboard
-        self.train_loader.dataset.shuffle_images()  # !!! STUPID shuffle again just to make sure
+        #self.train_loader.dataset.shuffle_images()  # !!! STUPID shuffle again just to make sure
 
         self.log_helper = NeptuneHelper()
 
@@ -194,7 +194,7 @@ class BaseModel(pl.LightningModule):
             return loss_g['sum']
 
     def training_epoch_end(self, outputs):
-        self.train_loader.dataset.shuffle_images()
+        #self.train_loader.dataset.shuffle_images()
 
         # checkpoint
         if self.epoch % 10 == 0:
@@ -213,6 +213,9 @@ class BaseModel(pl.LightningModule):
         self.net_d_scheduler.step()
 
         self.epoch += 1
+
+    def testing_step(self, batch, batch_idx):
+        self.generation(batch)
 
     def validation_epoch_end(self, x):
         self.log_helper.print(logger=self.logger, epoch=self.epoch)

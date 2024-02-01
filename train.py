@@ -164,5 +164,9 @@ if __name__ == '__main__':
     print(args)
     trainer.fit(net, train_loader, test_loader)
 
+    #print(len(train_set.subset[0].images))
+    #print(len(test_set.subset[0].images))
+    #print(len(set(train_set.subset[0].images + test_set.subset[0].images)))
+
     # Examples of  Usage
     # CUDA_VISIBLE_DEVICES=3 python train.py --prj test --models lesion_cutGB_xbm --jsn intersubject --lbX 1 --cropsize 256 -b 1 --xbm --start_iter 0 --xbm_size 1000

@@ -7,7 +7,7 @@ def customize_data_split(args):
     dataset = args.dataset
     split = args.split
     if split is not None:
-        folder = '/full/'
+        folder = '/fullXXX/'
 
         first_paired_folders = [os.path.join(os.environ.get('DATASET') + args.dataset + folder, x) for x in args.direction.split('%')[0].split('_')]
         image_list = [sorted([x.split('/')[-1] for x in glob.glob(first_paired_folders[i] + '/*')]) for i in range(len(first_paired_folders))]
@@ -26,6 +26,7 @@ def customize_data_split(args):
             if split == 'all':
                 train_index = range(0, length_data)
                 test_index = range(0, 1)
+                print(len(train_index))
         else:  # this works for load 3d slices
             if dataset == 'womac3':
                 if split == 'moaks':
@@ -48,6 +49,9 @@ def customize_data_split(args):
                     df.reset_index(inplace=True)
                     train_index = list(df.loc[df['READPRJ'].isnull(), :].index)[:]
                     test_index = list(df.loc[df['READPRJ'].notnull(), :].index)[:]
+                if split == 'train':
+                    train_index = range(0, 1558)
+                    test_index = range(0, 1)
             if dataset == 'oaiseg':
                 if split == 'a':
                     if args.load3d:

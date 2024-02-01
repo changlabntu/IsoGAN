@@ -99,6 +99,7 @@ class PairedSlices(data.Dataset):
 
         # get name of images if exist in the all the paired folders
         image_list = [sorted([x.split('/')[-1] for x in glob.glob(self.all_path[i] + '/*')]) for i in range(len(self.all_path))]
+
         self.images = list(reduce(set.intersection, [set(item) for item in image_list]))
 
         print('LL ' + str(len(self.images)))

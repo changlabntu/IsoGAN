@@ -96,6 +96,9 @@ class CenterLoss(nn.Module):
 
         classes = torch.arange(self.num_classes).long()
         if self.use_gpu: classes = classes.cuda()
+        if labels.size(0) != batch_size:
+            print(labels)
+            raise ValueError(f"Expected batch size {batch_size}, but got {labels.size(0)}")
         labels = labels.unsqueeze(1).expand(batch_size, self.num_classes)
         mask = labels.eq(classes.expand(batch_size, self.num_classes))
 
@@ -159,8 +162,6 @@ class GAN(BaseModel):
         # Finally, initialize the optimizers and scheduler
         self.configure_optimizers()
 
-        self.all_names = []
-
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("LitModel")
@@ -184,63 +185,96 @@ class GAN(BaseModel):
     def generation(self, batch):
         #cropz
         z_init = np.random.randint(7)
-        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
-        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
-
-        #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
-        print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
+        # print(batch['img'][0].shape)
+        ############
+        # batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
+        # batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
+        batch['img'][0] = batch['img'][0][:, :, :, :]
+        batch['img'][1] = batch['img'][1][:, :, :, :]
 
         if self.hparams.load3d:  # if working on 3D input, bring the Z dimension to the first and combine with batch
             batch['img'] = reshape_3d(batch['img'])
 
         self.oriX = batch['img'][0]
         self.oriY = batch['img'][1]
+        # print('batch[img][0]',batch['img'][0].shape)
+        # assert 0
 
-        # decaying skip connection
-        alpha = 0  # if always disconnected
+        # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
+        outXz = self.net_g(self.oriX, alpha=1, method='encode')
+        outX = self.net_g(outXz, alpha=1, method='decode')
+        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
+        self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
 
-        # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
-        outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
         #
-        outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
+        outYz = self.net_g(self.oriY, alpha=1, method='encode')
+        outY = self.net_g(outYz, alpha=1, method='decode')
+        self.imgYY = nn.Sigmoid()(outY['out0'])  # mask 0 - 1
+        self.imgYY = combine(self.imgYY, self.oriY, method='mul')  # i am using masking (0-1) here
 
         # global contrastive
         # use last layer
         self.outXz = outXz[-1]
         self.outYz = outYz[-1]
+        self.outXz = self.classify(self.outXz)
+        self.outYz = self.classify(self.outYz)
 
-        (B, C, X, Y) = self.outXz.shape
-        self.outXz = self.outXz.view(B//self.batch, self.batch, C, X, Y)
-        self.outXz = self.outXz.permute(1, 2, 3, 4, 0)
-        self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
+    def classify(self, f):
+        (B, C, X, Y) = f.shape
+        f = f.view(B//self.batch, self.batch, C, X, Y)
+        f = f.permute(1, 2, 3, 4, 0)
+        f = self.pool(f)[:, :, 0, 0, 0]
         if self.hparams.projection > 0:
-            self.outXz = self.net_g.projection(self.outXz)
-
-        self.outYz = self.outYz.view(B//self.batch, self.batch, C, X, Y)
-        self.outYz = self.outYz.permute(1, 2, 3, 4, 0)
-        self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
-        if self.hparams.projection > 0:
-            self.outYz = self.net_g.projection(self.outYz)
+            f = self.net_g.projection(f)
+        return f
 
     def backward_g(self):
-        loss_g = 0
         loss_dict = dict()
 
+        # adversarial
+        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
+        ayy = self.add_loss_adv(a=self.imgYY, net_d=self.net_d, truth=True)
+
+        # L1(XY, Y)
+        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
+
+        loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
+
+        loss_ga = axy * 0.5 + ayy * 0.5
+
+        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb + loss_l1Y * self.hparams.lamb
+
+        loss_dict['loss_l1'] = loss_l1
+        loss_dict['loss_l1Y'] = loss_l1Y
+
         # global contrastive
-        loss_t = 0
-        loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
-        loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
-        loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
-        loss_g += loss_t + loss_center
+        #loss_t = 0
+        #loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
+        #loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
+        # loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
+        #loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 1]).cuda())
+        #loss_g += loss_t + loss_center
 
         loss_dict['loss_t'] = loss_t
         loss_dict['loss_center'] = loss_center
+
         loss_dict['sum'] = loss_g
 
         return loss_dict
 
     def backward_d(self):
-        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
+        # ADV(XY)-
+        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
+        # ADV(Y)+
+        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
+        # ADV(YY)-
+        ayy = self.add_loss_adv(a=self.imgYY.detach(), net_d=self.net_d, truth=False)
+
+        # adversarial of xy (-) and y (+)
+        loss_da = axy * 0.25 + ay * 0.5 + ayy * 0.25 #+ axx * 0.25 + ax * 0.25 + ay * 0.25
+        # classify x (+) vs y (-)
+        loss_d = loss_da * self.hparams.adv
+
+        return {'sum': loss_d, 'da': loss_da}
 
 
-# python train.py --alpha 0 --jsn womac4 --prj global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16/ --models lesion_global1_cut1 --netG edalphand --split moaks --dataset womac4 --lbvgg 0 --lbNCE 4 --nm 01 --fDown 4 --use_mlp --fWhich 0 0 1 1 -b 2 --ngf 32 --projection 32 --env runpod --n_epochs 200 --lr_policy cosine
