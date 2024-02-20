@@ -101,9 +101,11 @@ class VGGLoss(nn.Module):
 
 
 class BaseModel(pl.LightningModule):
-    def __init__(self, hparams, train_loader, test_loader, checkpoints):
-        super(BaseModel, self).__init__()
+    def __init__(self, hparams, train_loader, eval_loader, checkpoints):
+        super().__init__()
+        # adding data
         self.train_loader = train_loader
+        self.eval_loader = eval_loader
 
         # initialize
         self.epoch = 0
@@ -135,6 +137,10 @@ class BaseModel(pl.LightningModule):
         #self.train_loader.dataset.shuffle_images()  # !!! STUPID shuffle again just to make sure
 
         self.log_helper = NeptuneHelper()
+
+        self.all_label = []
+        self.all_out = []
+        self.all_loss = []
 
     #def update_optimizer_scheduler(self):
     #    [self.optimizer_d, self.optimizer_g], [] = self.configure_optimizers()
@@ -171,6 +177,13 @@ class BaseModel(pl.LightningModule):
     def add_loss_l1(self, a, b):
         l1 = self.criterionL1(a, b)
         return l1
+
+    def save_auc_csv(self, auc, epoch):
+        auc = auc.cpu().numpy()
+        auc = np.insert(auc, 0, epoch)
+        with open(os.path.join(os.environ.get('LOGS'), self.hparams.prj, 'auc.csv'), 'a') as f:
+            writer = csv.writer(f)
+            writer.writerow(auc)
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         if optimizer_idx == 0:
@@ -218,8 +231,9 @@ class BaseModel(pl.LightningModule):
         self.generation(batch)
 
     def validation_epoch_end(self, x):
-        self.log_helper.print(logger=self.logger, epoch=self.epoch)
-        self.log_helper.clear()
+        #self.log_helper.print(logger=self.logger, epoch=self.epoch)
+        #self.log_helper.clear()
+        return None
 
     def get_progress_bar_dict(self):
         tqdm_dict = super().get_progress_bar_dict()

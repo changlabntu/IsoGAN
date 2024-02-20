@@ -102,7 +102,6 @@ if __name__ == '__main__':
         t_args.__dict__.update(json.load(f)['train'])
         args = parser.parse_args(namespace=t_args)
 
-
     # environment file
     if args.env is not None:
         load_dotenv('env/.' + args.env)
@@ -129,13 +128,13 @@ if __name__ == '__main__':
                               pin_memory=True, drop_last=True)
 
     if test_index is not None:
-        test_set = Dataset(root=os.environ.get('DATASET') + args.dataset + folder,
+        eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + folder,
                            path=args.direction,
                            opt=args, mode='test', index=test_index, filenames=True)
-        test_loader = DataLoader(dataset=test_set, num_workers=1, batch_size=args.batch_size, shuffle=False,
+        eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.batch_size, shuffle=False,
                                  pin_memory=True)
     else:
-        test_loader = None
+        eval_loader = None
 
     # preload
     if args.preload:
@@ -143,8 +142,8 @@ if __name__ == '__main__':
         print('Preloading...')
         for i, x in enumerate(tqdm(train_loader)):
             pass
-        if test_loader is not None:
-            for i, x in enumerate(tqdm(test_loader)):
+        if eval_loader is not None:
+            for i, x in enumerate(tqdm(eval_loader)):
                 pass
         print('Preloading time: ' + str(time.time() - tini))
 
@@ -155,14 +154,16 @@ if __name__ == '__main__':
     # Trainer
     checkpoints = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'checkpoints')
     os.makedirs(checkpoints, exist_ok=True)
-    net = GAN(hparams=args, train_loader=train_loader, test_loader=test_loader, checkpoints=checkpoints)
+    net = GAN(hparams=args, train_loader=train_loader, eval_loader=eval_loader, checkpoints=checkpoints)
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
                          max_epochs=args.n_epochs + 1,  # progress_bar_refresh_rate=20,
                          logger=logger,
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1)
     print(args)
-    trainer.fit(net, train_loader, test_loader)
+    trainer.fit(net, train_loader, eval_loader)
+
+    #train(net, args, train_set, eval_set, loss_function, metrics)
 
     #print(len(train_set.subset[0].images))
     #print(len(test_set.subset[0].images))

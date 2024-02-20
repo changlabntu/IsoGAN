@@ -188,7 +188,6 @@ class GAN(BaseModel):
         batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
         #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
-        print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
 
         if self.hparams.load3d:  # if working on 3D input, bring the Z dimension to the first and combine with batch
             batch['img'] = reshape_3d(batch['img'])

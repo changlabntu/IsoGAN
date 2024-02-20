@@ -15,6 +15,8 @@ from models.helper_oai import OaiSubjects, classify_easy_3d, swap_by_labels
 from models.helper import reshape_3d, tile_like
 from networks.networks_cut import Normalize, init_net, PatchNCELoss
 from models.IsoGAN import PatchSampleF
+from utils.metrics_classification import ClassificationLoss, GetAUC
+
 
 class TripletCenterLoss(nn.Module):
     def __init__(self, margin=0, num_classes=2):
@@ -106,8 +108,11 @@ class CenterLoss(nn.Module):
 
 
 class GAN(BaseModel):
-    def __init__(self, hparams, train_loader, test_loader, checkpoints):
-        BaseModel.__init__(self, hparams, train_loader, test_loader, checkpoints)
+    def __init__(self, hparams, train_loader, eval_loader, checkpoints):
+        BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
+        #self.train_loader = train_loader
+        #self.eval_loader = eval_loader
+        print(len(self.eval_loader))
         # First, modify the hyper-parameters if necessary
         # Initialize the networks
         self.hparams.final = 'none'
@@ -159,6 +164,12 @@ class GAN(BaseModel):
         # Finally, initialize the optimizers and scheduler
         self.configure_optimizers()
 
+        self.all_names = []
+
+        self.loss_function = ClassificationLoss()
+        self.get_metrics = GetAUC()
+        self.best_auc = 0
+
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("LitModel")
@@ -185,6 +196,9 @@ class GAN(BaseModel):
         batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
         batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
+        #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
+        #print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
+
         if self.hparams.load3d:  # if working on 3D input, bring the Z dimension to the first and combine with batch
             batch['img'] = reshape_3d(batch['img'])
 
@@ -192,122 +206,135 @@ class GAN(BaseModel):
         self.oriY = batch['img'][1]
 
         # decaying skip connection
-        if self.hparams.alpha > 0:  # if decaying
-            alpha = 1 - self.epoch / self.hparams.alpha
-            if alpha < 0:
-                alpha = 0
-        else:
-            alpha = 0  # if always disconnected
+        alpha = 0  # if always disconnected
 
-        # generating a mask by sigmoid to locate the lesions, turn out its the best way for now
-        outXz = self.net_g(self.oriX, alpha=1, method='encode')
-        outX = self.net_g(outXz, alpha=1, method='decode')
-        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
-        self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
-
+        # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
+        outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
         #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
-        outY = self.net_gY(outYz, alpha=alpha, method='decode')
-        self.imgYY = nn.Tanh()(outY['out0'])  # -1 ~ 1, real img
 
         # global contrastive
         # use last layer
         self.outXz = outXz[-1]
         self.outYz = outYz[-1]
-        self.outXz = self.classify(self.outXz)
-        self.outYz = self.classify(self.outYz)
 
-        # extra
-        imgXYz = self.net_g(self.imgXY, alpha=1, method='encode')
-        self.imgXYz = imgXYz[-1]
-        self.imgXYz = self.classify(self.imgXYz)
-        #imgYYz = self.net_g(self.imgYY, alpha=1, method='encode')
+        # reshape
+        (B, C, X, Y) = self.outXz.shape
+        self.outXz = self.outXz.view(B//self.batch, self.batch, C, X, Y)
+        self.outXz = self.outXz.permute(1, 2, 3, 4, 0)
+        self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
 
-    def classify(self, f):
-        # this is for the knee (Z, C, X, Y), you may need to change it
-        (B, C, X, Y) = f.shape
-        f = f.view(B//self.batch, self.batch, C, X, Y)
-        f = f.permute(1, 2, 3, 4, 0)
-        f = self.pool(f)[:, :, 0, 0, 0]
-        if self.hparams.projection > 0:
-            f = self.net_g.projection(f)
-        return f
+        self.outYz = self.outYz.view(B//self.batch, self.batch, C, X, Y)
+        self.outYz = self.outYz.permute(1, 2, 3, 4, 0)
+        self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
 
     def backward_g(self):
+        loss_g = 0
         loss_dict = dict()
 
-        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
-
-        # L1(XY, Y)
-        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
-
-        loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
-
-        loss_ga = axy  # * 0.5 + axx * 0.5
-
-        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb + loss_l1Y * self.hparams.lamb
-
-        if self.hparams.lbvgg > 0:
-            loss_gvgg = self.VGGloss(torch.cat([self.imgXY] * 3, 1), torch.cat([self.oriY] * 3, 1))
-            loss_g += loss_gvgg * self.hparams.lbvgg
-        else:
-            loss_gvgg = 0
-
-        # CUT NCE_loss
-        if self.hparams.lbNCE > 0:
-            # (Y, YY) (XY, YY) (Y, XY)
-            feat_q = self.net_g(self.oriY, method='encode')
-            feat_k = self.net_g(self.imgXY, method='encode')
-
-            feat_q = [self.featDown(f) for f in feat_q]
-            feat_k = [self.featDown(f) for f in feat_k]
-
-            feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
-                                                None)  # get source patches by random id
-            feat_q_pool, _ = self.netF(feat_q, self.hparams.num_patches, sample_ids)  # use the ids for query target
-
-            total_nce_loss = 0.0
-            for f_q, f_k, crit, f_w in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.hparams.fWhich):
-                loss = crit(f_q, f_k) * f_w
-                total_nce_loss += loss.mean()
-            loss_nce = total_nce_loss / 4
-            loss_g += loss_nce * self.hparams.lbNCE
-            loss_dict['loss_nce'] = loss_nce
-        else:
-            loss_nce = 0
-
-        loss_dict['loss_l1'] = loss_l1
-        loss_dict['loss_l1Y'] = loss_l1Y
-
         # global contrastive
-        loss_t = 0
-        loss_t += self.triple(self.outYz[:1, ::], self.imgXYz[1:, ::], self.outXz[:1, ::])
-        loss_t += self.triple(self.outYz[1:, ::], self.imgXYz[:1, ::], self.outXz[1:, ::])
-        loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0),
-                                  torch.FloatTensor([0, 0, 1, 1]).cuda())
-        loss_g += loss_t + loss_center
+        if 0:
+            loss_t = 0
+            loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
+            loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
+            loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
+            loss_g += loss_t + loss_center
+            loss_dict['loss_t'] = loss_t
+            loss_dict['loss_center'] = loss_center
 
-        loss_dict['loss_t'] = loss_t
-        loss_dict['loss_center'] = loss_center
+        # classification
+        labels = ((torch.rand(self.outXz.shape[0]) > 0.5) / 1).long().cuda()
+        flip = (labels - 0.5) * 2
+        flip = flip.unsqueeze(1).repeat(1, self.outXz.shape[1])
+        output = torch.multiply(flip, (self.outXz - self.outYz))
+        output = self.net_g.projection(output)
+
+        loss, _ = self.loss_function(output, labels)
+        loss_g += loss
 
         loss_dict['sum'] = loss_g
 
         return loss_dict
 
     def backward_d(self):
-        # ADV(XY)-
-        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
+        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
 
-        # ADV(XX)-
-        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
-        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
+    def validation_step(self, batch, batch_idx=0):
+        z_init = np.random.randint(7)
+        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
+        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
-        # adversarial of xy (-) and y (+)
-        loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
-        # classify x (+) vs y (-)
-        loss_d = loss_da * self.hparams.adv
+        #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
+        #print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
 
-        return {'sum': loss_d, 'da': loss_da}
+        if self.hparams.load3d:  # if working on 3D input, bring the Z dimension to the first and combine with batch
+            batch['img'] = reshape_3d(batch['img'])
+        oriX = batch['img'][0]
+        oriY = batch['img'][1]
+
+        # decaying skip connection
+        alpha = 0  # if always disconnected
+
+        # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
+        outXz = self.net_g(oriX, alpha=alpha, method='encode')[-1]
+        #
+        outYz = self.net_g(oriY, alpha=alpha, method='encode')[-1]
+
+        # reshape
+        (B, C, X, Y) = outXz.shape
+        outXz = outXz.view(B//self.batch, self.batch, C, X, Y)
+        outXz = outXz.permute(1, 2, 3, 4, 0)
+        outXz = self.pool(outXz)[:, :, 0, 0, 0]
+
+        outYz = outYz.view(B//self.batch, self.batch, C, X, Y)
+        outYz = outYz.permute(1, 2, 3, 4, 0)
+        outYz = self.pool(outYz)[:, :, 0, 0, 0]
+
+        labels = ((torch.rand(outXz.shape[0]) > 0.5) / 1).long().cuda()
+        flip = (labels - 0.5) * 2
+        flip = flip.unsqueeze(1).repeat(1, outXz.shape[1])
+        output = torch.multiply(flip, (outXz - outYz))
+
+        output = self.net_g.projection(output)
+
+        loss, _ = self.loss_function(output, labels)
+
+        self.log('val_loss', loss, on_step=False, on_epoch=True,
+                 prog_bar=True, logger=True, sync_dist=True)
+
+        # metrics
+        self.all_label.append(labels.cpu())
+        self.all_out.append(output.cpu().detach())
+        self.all_loss.append(loss.detach().cpu().numpy())
+
+        return loss
+
+    def validation_epoch_end(self, x):
+        #self.train_loader.dataset.shuffle_images()
+        #self.eval_loader.dataset.shuffle_images()
+        if 1:#self.trainer.global_rank == 0:
+            all_out = torch.cat(self.all_out, 0)
+            all_label = torch.cat(self.all_label, 0)
+            metrics = self.get_metrics(all_label, all_out)
+
+            auc = torch.from_numpy(np.array(metrics)).cuda()
+            for i in range(len(auc)):
+                self.log('auc' + str(i), auc[i], on_step=False, on_epoch=True, prog_bar=True, logger=True,
+                             sync_dist=True)
+            self.all_label = []
+            self.all_out = []
+            self.tini = time.time()
+
+            if (auc[0] > self.best_auc) and (self.epoch >= 2):
+                self.best_auc = auc[0]
+
+            self.all_loss = []
+            self.epoch += 1
+            #self.save_auc_csv(auc[0], self.epoch)
+            return metrics
+        else:
+            return 0
 
 
-# python train.py --alpha 0 --jsn womac4 --prj global1_cut1/nce4_down4_0011_ngf32_proj32_zcrop16/ --models lesion_global1_cut1 --netG edalphand --split moaks --dataset womac4 --lbvgg 0 --lbNCE 4 --nm 01 --fDown 4 --use_mlp --fWhich 0 0 1 1 -b 2 --ngf 32 --projection 32 --env runpod --n_epochs 200 --lr_policy cosine
+
+# CUDA_VISIBLE_DEVICES=0 train.py --jsn womac4 --prj cls2/ --models lesion_global1_cls --netG edalphand2  --dataset womac4 --lbvgg 0 --lbNCE 0 --nm 01 --fDown 4 --use_mlp --fWhich 0 0 1 1 -b 2 --ngf 32 --projection 2 --n_epochs 200 --lr_policy cosine --direction ap_bp --save_d --alpha 1 --env t09

@@ -4,7 +4,6 @@ import numpy as np
 from sklearn import metrics
 from torch.nn import functional as F
 
-
 class CrossEntropyLoss(nn.Module):
     """Dice loss of binary class
     Args:
@@ -22,7 +21,7 @@ class CrossEntropyLoss(nn.Module):
         return loss_c,
 
 
-class ContrastiveLoss(nn.Module):
+class ContrastiveLossXXX(nn.Module):
     """
     Contrastive loss
     Takes embeddings of two samples and a target label == 1 if samples are from the same class and label == 0 otherwise
@@ -56,11 +55,15 @@ class ClassificationLoss(nn.Module):
     def forward(self, output, labels):
         x = output
         y = labels
-        loss_val, = self.cross_entropy_loss(x, y)
-        return loss_val
+        loss_classify, = self.cross_entropy_loss(x, y)
+
+        loss_all = [loss_classify]
+        loss_val = loss_all[0]
+
+        return loss_val, loss_all
 
 
-class ClassifyAndContrastiveLoss(nn.Module):
+class ClassifyAndContrastiveLossXXX(nn.Module):
     """Dice loss of binary class
     Args:
     Returns:
@@ -104,7 +107,7 @@ class GetAUC(nn.Module):
 
     def forward(self, all_label, all_out):
         auc = []
-        for n in range(0, all_out.shape[1]):
+        for n in range(1, all_out.shape[1]):
             fpr, tpr, thresholds = metrics.roc_curve(all_label, all_out[:, n], pos_label=n)
             auc.append(metrics.auc(fpr, tpr))
 

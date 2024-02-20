@@ -227,27 +227,23 @@ class PairedSlices3D(PairedSlices):
             index = idx
 
         # add all the slices into the dict
-        a_subject = self.orders[index]  # get the subject name
+        location_to_split = [0]
         filenames = []
-        length_of_each_path = []
+        slices = sorted(self.subjects[self.subjects_keys[index]]) # get all the slices of this subject
         for i in range(len(self.all_path)):  # loop over all the paths
-            selected = sorted(self.subjects[a_subject])
-            slices = [join(self.all_path[i], x) for x in selected]
-            filenames = filenames + slices
-            length_of_each_path.append(len(slices))
+            slices_per_path = [join(self.all_path[i], x) for x in slices]
+            filenames = filenames + slices_per_path
+            location_to_split.append(location_to_split[-1] + len(slices_per_path))
         inputs = self.load_to_dict(filenames)
 
         # Do augmentation
         outputs = self.get_augumentation(inputs)
 
-        # split to different paths
-        total = []
-        for split in length_of_each_path:
-            temp = []
-            for i in range(split):
-                temp.append(outputs.pop(0).unsqueeze(3))
-            total.append(torch.cat(temp, 3))
-        outputs = total
+        # split by different paths
+
+        outputs = torch.stack(outputs, dim=3)
+        outputs = torch.tensor_split(outputs, location_to_split[1:], dim=3)[:-1]
+        outputs = [x for x in outputs]
 
         # normalize tensor
         if self.opt.nm == '11':
