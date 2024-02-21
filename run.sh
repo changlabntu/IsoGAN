@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=0 python train.py --jsn womac4 --prj cls2/tc --models lesion_siamese --netG edalphand2  --dataset womac4 --lbvgg 0 --lbNCE 0 --nm 01 --fDown 4  -b 4 --ngf 32 --projection 2  --lr_policy cosine --direction ap_bp --alpha 1 --env t09b --split a
+CUDA_VISIBLE_DEVICES=0 python train.py --jsn womac4 --prj siamese_gan/0 --models lesion_siamese_gan --netG edalphand2  --dataset womac4 --lbvgg 0 --lbNCE 0 --nm 01 --fDown 4  -b 4 --ngf 32 --projection 2  --lr_policy cosine --direction ap_bp --alpha 1 --env t09b --split a

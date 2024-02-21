@@ -110,9 +110,6 @@ class CenterLoss(nn.Module):
 class GAN(BaseModel):
     def __init__(self, hparams, train_loader, eval_loader, checkpoints):
         BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
-        #self.train_loader = train_loader
-        #self.eval_loader = eval_loader
-        print(len(self.eval_loader))
         # First, modify the hyper-parameters if necessary
         # Initialize the networks
         self.hparams.final = 'none'
@@ -122,7 +119,7 @@ class GAN(BaseModel):
         self.classifier = nn.Conv2d(256, 2, 1, stride=1, padding=0).cuda()
 
         # update names of the models for optimization
-        self.netg_names = {'net_g': 'net_g', 'net_gY': 'net_gY', 'netF': 'netF'}
+        self.netg_names = {'net_g': 'net_g', 'netF': 'netF'}
         self.netd_names = {'net_d': 'net_d'}
 
         self.oai = OaiSubjects(self.hparams.dataset)
@@ -210,8 +207,12 @@ class GAN(BaseModel):
 
         # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
         outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
-        #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
+
+        # image generation
+        outX = self.net_g(outXz, alpha=alpha, method='decode')
+        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
+        self.imgXY = combine(self.imgXY, self.oriX, method='mul')
 
         # global contrastive
         # use last layer
@@ -229,8 +230,17 @@ class GAN(BaseModel):
         self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
 
     def backward_g(self):
-        loss_g = 0
         loss_dict = dict()
+        loss = 0
+
+        # adversarial
+        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
+        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
+        loss_ga = axy  # * 0.5 + axx * 0.5
+        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb
+
+        loss_dict['t_g'] = loss_g
+        loss += loss_g
 
         # global contrastive
         if 0:
@@ -248,17 +258,29 @@ class GAN(BaseModel):
         flip = flip.unsqueeze(1).repeat(1, self.outXz.shape[1])
         output = torch.multiply(flip, (self.outXz - self.outYz))
         output = self.net_g.projection(output)
+        loss_cls, _ = self.loss_function(output, labels)
 
-        loss, _ = self.loss_function(output, labels)
-        loss_g += loss
+        loss_dict['t_cls'] = loss_cls
+        loss += loss_cls
 
-        loss_dict['t_cls'] = loss
-        loss_dict['sum'] = loss_g
+        loss_dict['sum'] = loss
 
         return loss_dict
 
     def backward_d(self):
-        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
+        # ADV(XY)-
+        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
+
+        # ADV(XX)-
+        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
+        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
+
+        # adversarial of xy (-) and y (+)
+        loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
+        # classify x (+) vs y (-)
+        loss_d = loss_da * self.hparams.adv
+
+        return {'sum': loss_d, 'da': loss_da}
 
     def validation_step(self, batch, batch_idx=0):
         z_init = np.random.randint(7)
