@@ -120,21 +120,18 @@ if __name__ == '__main__':
 
     folder, train_index, test_index = customize_data_split(args=args)
 
-    train_set = Dataset(root=os.environ.get('DATASET') + args.dataset + folder,
+    train_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/train/',
                         path=args.direction,
                         opt=args, mode='train', index=train_index, filenames=True)
 
     train_loader = DataLoader(dataset=train_set, num_workers=1, batch_size=args.batch_size, shuffle=True,
                               pin_memory=True, drop_last=True)
 
-    if test_index is not None:
-        eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + folder,
-                           path=args.direction,
-                           opt=args, mode='test', index=test_index, filenames=True)
-        eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.batch_size, shuffle=False,
-                                 pin_memory=True)
-    else:
-        eval_loader = None
+    eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
+                       path=args.direction,
+                       opt=args, mode='test', index=test_index, filenames=True)
+    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.batch_size, shuffle=False,
+                             pin_memory=True)
 
     # preload
     if args.preload:

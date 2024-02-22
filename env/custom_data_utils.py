@@ -7,7 +7,7 @@ def customize_data_split(args):
     dataset = args.dataset
     split = args.split
     if split is not None:
-        folder = '/fullXXX/'
+        folder = '/full/'
 
         first_paired_folders = [os.path.join(os.environ.get('DATASET') + args.dataset + folder, x) for x in args.direction.split('%')[0].split('_')]
         image_list = [sorted([x.split('/')[-1] for x in glob.glob(first_paired_folders[i] + '/*')]) for i in range(len(first_paired_folders))]
