@@ -283,9 +283,9 @@ class GAN(BaseModel):
         return {'sum': loss_d, 'da': loss_da}
 
     def validation_step(self, batch, batch_idx=0):
-        z_init = np.random.randint(7)
-        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
-        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
+        #z_init = np.random.randint(7)
+        #batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
+        #batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
         #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
         #print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
