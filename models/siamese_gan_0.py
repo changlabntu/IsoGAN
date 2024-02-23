@@ -114,35 +114,13 @@ class GAN(BaseModel):
         # Initialize the networks
         self.hparams.final = 'none'
         self.net_g, self.net_d = self.set_networks()
-        self.hparams.final = 'none'
-        self.net_gY, _ = self.set_networks()
         self.classifier = nn.Conv2d(256, 2, 1, stride=1, padding=0).cuda()
 
         # update names of the models for optimization
-        self.netg_names = {'net_g': 'net_g', 'netF': 'netF'}
+        self.netg_names = {'net_g': 'net_g'}
         self.netd_names = {'net_d': 'net_d'}
 
         self.oai = OaiSubjects(self.hparams.dataset)
-
-        if hparams.lbvgg > 0:
-            self.VGGloss = VGGLoss().cuda()
-
-        # CUT NCE
-        self.featDown = nn.MaxPool2d(kernel_size=self.hparams.fDown)  # extra pooling to increase field of view
-
-        netF = PatchSampleF(use_mlp=self.hparams.use_mlp, init_type='normal', init_gain=0.02, gpu_ids=[], nc=self.hparams.c_mlp)
-        self.netF = init_net(netF, init_type='normal', init_gain=0.02, gpu_ids=[])
-        feature_shapes = [x * self.hparams.ngf for x in [1, 2, 4, 8]]
-        self.netF.create_mlp(feature_shapes)
-
-        if self.hparams.fWhich == None:  # which layer of the feature map to be considered in CUT
-            self.hparams.fWhich = [1 for i in range(len(feature_shapes))]
-
-        print(self.hparams.fWhich)
-
-        self.criterionNCE = []
-        for nce_layer in range(4):  # self.nce_layers:
-            self.criterionNCE.append(PatchNCELoss(opt=hparams))  # .to(self.device))
 
         # global contrastive
         self.batch = self.hparams.batch_size
@@ -220,13 +198,16 @@ class GAN(BaseModel):
         self.outYz = outYz[-1]
 
         # reshape
-        (B, C, X, Y) = self.outXz.shape
-        self.outXz = self.outXz.view(B//self.batch, self.batch, C, X, Y)
-        self.outXz = self.outXz.permute(1, 2, 3, 4, 0)
+        # (B * Z, C, H, W)
+        (BZ, C, X, Y) = self.outXz.shape
+        Z = BZ // self.batch
+
+        self.outXz = self.outXz.view(self.batch, Z, C, X, Y)
+        self.outXz = self.outXz.permute(0, 2, 3, 4, 1)
         self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
 
-        self.outYz = self.outYz.view(B//self.batch, self.batch, C, X, Y)
-        self.outYz = self.outYz.permute(1, 2, 3, 4, 0)
+        self.outYz = self.outYz.view(self.batch, Z, C, X, Y)
+        self.outYz = self.outYz.permute(0, 2, 3, 4, 1)
         self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
 
     def backward_g(self):
@@ -241,16 +222,6 @@ class GAN(BaseModel):
 
         loss_dict['t_g'] = loss_g
         loss += loss_g
-
-        # global contrastive
-        if 0:
-            loss_t = 0
-            loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
-            loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
-            loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
-            loss_g += loss_t + loss_center
-            loss_dict['loss_t'] = loss_t
-            loss_dict['loss_center'] = loss_center
 
         # classification
         labels = ((torch.rand(self.outXz.shape[0]) > 0.5) / 1).long().cuda()
@@ -305,13 +276,18 @@ class GAN(BaseModel):
         outYz = self.net_g(oriY, alpha=alpha, method='encode')[-1]
 
         # reshape
-        (B, C, X, Y) = outXz.shape
-        outXz = outXz.view(B // batch, batch, C, X, Y)
-        outXz = outXz.permute(1, 2, 3, 4, 0)
+        (BZ, C, X, Y) = outXz.shape
+        Z = BZ // batch
+
+        #self.outXz = self.outXz.view(self.batch, Z, C, X, Y) !!!!!
+        #self.outXz = self.outXz.permute(0, 2, 3, 4, 1) !!!!!
+
+        outXz = outXz.view(batch, Z, C, X, Y)
+        outXz = outXz.permute(0, 2, 3, 4, 1)
         outXz = self.pool(outXz)[:, :, 0, 0, 0]
 
-        outYz = outYz.view(B // batch, batch, C, X, Y)
-        outYz = outYz.permute(1, 2, 3, 4, 0)
+        outYz = outYz.view(batch, Z, C, X, Y)
+        outYz = outYz.permute(0, 2, 3, 4, 1)
         outYz = self.pool(outYz)[:, :, 0, 0, 0]
 
         labels = ((torch.rand(outXz.shape[0]) > 0.5) / 1).long().cuda()

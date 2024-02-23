@@ -48,10 +48,11 @@ from networks.DeScarGan.descargan import get_activation
 
 
 def conv2d_block(in_channels, out_channels, kernel=3, momentum=0.01, norm_type='instance', activation=ACTIVATION):
-    if norm_type is not 'none':
+    if norm_type != 'none':
         norm_layer = get_norm_layer(norm_type)(out_channels, momentum=momentum)
     else:
         norm_layer = Identity()
+
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel, padding=1),
         norm_layer,
@@ -63,10 +64,11 @@ def Identity():
 
 def deconv2d_block(in_channels, out_channels, use_upsample=True, kernel=4, stride=2, padding=1, momentum=0.01,
                    norm_type='instance', activation=ACTIVATION):
-    if norm_type is not 'none':
+    if norm_type != 'none':
         norm_layer = get_norm_layer(norm_type)(out_channels, momentum=momentum)
     else:
         norm_layer = Identity()
+
     if use_upsample:
         up = nn.Sequential(
             nn.Upsample(scale_factor=2),
@@ -85,7 +87,6 @@ class Generator(nn.Module):
     def __init__(self, n_channels=1, out_channels=1, nf=32, activation=ACTIVATION, norm_type='instance',
                  final='tanh', mc=False):
         super(Generator, self).__init__()
-
         conv_block = conv2d_block
         deconv_block = deconv2d_block
 
@@ -186,7 +187,7 @@ class Generator(nn.Module):
 
 
 if __name__ == '__main__':
-    g = Generator(n_channels=3, final='tanh')
+    g = Generator(n_channels=3, final='tanh', norm_type='none')
     #from torchsummary import summary
     from utils.data_utils import print_num_of_parameters
     print_num_of_parameters(g)
