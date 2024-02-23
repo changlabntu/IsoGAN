@@ -287,8 +287,7 @@ class BaseModel(pl.LightningModule):
                                 self.hparams.netG).Generator
             # descargan only has options for batchnorm or none
             net_g = Generator(n_channels=self.hparams.input_nc, out_channels=self.hparams.output_nc, nf=self.hparams.ngf,
-                              batch_norm={'batch': True, 'none': False}[self.hparams.norm],  # only bn or none
-                              final=self.hparams.final, mc=self.hparams.mc)
+                              norm_type=self.hparams.norm, final=self.hparams.final, mc=self.hparams.mc)
 
         elif self.hparams.netG .startswith('res'):
             print('resnet generator: ' + self.hparams.netG)

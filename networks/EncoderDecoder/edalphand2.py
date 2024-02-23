@@ -17,21 +17,77 @@ import torch.nn as nn
 import torch.nn.functional as F
 from networks.model_utils import get_activation
 import numpy as np
+import functools
 
 sig = nn.Sigmoid()
 ACTIVATION = nn.ReLU
 #device = 'cuda'
 
 
-from networks.DeScarGan.descargan import conv2d_block, conv2d_bn_block, deconv2d_bn_block, get_activation, deconv2d_block
+def get_norm_layer(norm_type='instance'):
+    """Return a normalization layer
+
+    Parameters:
+        norm_type (str) -- the name of the normalization layer: batch | instance | none
+
+    For BatchNorm, we use learnable affine parameters and track running statistics (mean/stddev).
+    For InstanceNorm, we do not use learnable affine parameters. We do not track running statistics.
+    """
+    if norm_type == 'batch':
+        norm_layer = functools.partial(nn.BatchNorm2d, affine=True, track_running_stats=True)
+    elif norm_type == 'instance':
+        norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
+    elif norm_type == 'none':
+        def norm_layer(x): return Identity()
+    else:
+        raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
+    return norm_layer
+
+
+from networks.DeScarGan.descargan import get_activation
+
+
+def conv2d_block(in_channels, out_channels, kernel=3, momentum=0.01, norm_type='instance', activation=ACTIVATION):
+    if norm_type is not 'none':
+        norm_layer = get_norm_layer(norm_type)(out_channels, momentum=momentum)
+    else:
+        norm_layer = Identity()
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel, padding=1),
+        norm_layer,
+        activation(),
+    )
+
+def Identity():
+    return nn.Identity()
+
+def deconv2d_block(in_channels, out_channels, use_upsample=True, kernel=4, stride=2, padding=1, momentum=0.01,
+                   norm_type='instance', activation=ACTIVATION):
+    if norm_type is not 'none':
+        norm_layer = get_norm_layer(norm_type)(out_channels, momentum=momentum)
+    else:
+        norm_layer = Identity()
+    if use_upsample:
+        up = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1)
+        )
+    else:
+        up = nn.ConvTranspose2d(in_channels, out_channels, kernel, stride=stride, padding=padding)
+    return nn.Sequential(
+        up,
+        norm_layer,
+        activation(),
+    )
 
 
 class Generator(nn.Module):
-    def __init__(self, n_channels=1, out_channels=1, nf=32, batch_norm=True, activation=ACTIVATION, final='tanh', mc=False):
+    def __init__(self, n_channels=1, out_channels=1, nf=32, activation=ACTIVATION, norm_type='instance',
+                 final='tanh', mc=False):
         super(Generator, self).__init__()
 
-        conv_block = conv2d_bn_block if batch_norm else conv2d_block
-        deconv_block = deconv2d_bn_block if batch_norm else deconv2d_block
+        conv_block = conv2d_block
+        deconv_block = deconv2d_block
 
         max_pool = nn.MaxPool2d(2)
         act = activation
@@ -44,52 +100,52 @@ class Generator(nn.Module):
         self.c_dim = 0
 
         self.down0 = nn.Sequential(
-            conv_block(n_channels + self.c_dim, nf, activation=act),
-            conv_block(nf, nf, activation=act)
+            conv_block(n_channels + self.c_dim, nf, activation=act, norm_type=norm_type),
+            conv_block(nf, nf, activation=act, norm_type=norm_type),
         )
         self.down1 = nn.Sequential(
             max_pool,
-            conv_block(nf, 2 * nf, activation=act),
-            conv_block(2 * nf, 2 * nf, activation=act),
+            conv_block(nf, 2 * nf, activation=act, norm_type=norm_type),
+            conv_block(2 * nf, 2 * nf, activation=act, norm_type=norm_type),
         )
         self.down2 = nn.Sequential(
             max_pool,
-            conv_block(2 * nf, 4 * nf, activation=act),
+            conv_block(2 * nf, 4 * nf, activation=act, norm_type=norm_type),
             nn.Dropout(p=dropout, inplace=False),
-            conv_block(4 * nf, 4 * nf, activation=act),
+            conv_block(4 * nf, 4 * nf, activation=act, norm_type=norm_type),
 
         )
         self.down3 = nn.Sequential(
             max_pool,
-            conv_block(4 * nf, 8 * nf, activation=act),
+            conv_block(4 * nf, 8 * nf, activation=act, norm_type=norm_type),
             nn.Dropout(p=dropout, inplace=False),
-            conv_block(8 * nf, 8 * nf, activation=act),
+            conv_block(8 * nf, 8 * nf, activation=act, norm_type=norm_type),
         )
 
-        self.up3 = deconv_block(8 * nf, 4 * nf, activation=act)
+        self.up3 = deconv_block(8 * nf, 4 * nf, activation=act, norm_type=norm_type)
 
         self.conv5 = nn.Sequential(
-            conv_block(8 * nf, 4 * nf, activation=act),  # 8
+            conv_block(8 * nf, 4 * nf, activation=act, norm_type=norm_type),  # 8
             nn.Dropout(p=dropout, inplace=False),
-            conv_block(4 * nf, 4 * nf, activation=act),
+            conv_block(4 * nf, 4 * nf, activation=act, norm_type=norm_type),
         )
-        self.up2 = deconv_block(4 * nf, 2 * nf, activation=act)
+        self.up2 = deconv_block(4 * nf, 2 * nf, activation=act, norm_type=norm_type)
         self.conv6 = nn.Sequential(
-            conv_block(4 * nf, 2 * nf, activation=act),
+            conv_block(4 * nf, 2 * nf, activation=act, norm_type=norm_type),
             nn.Dropout(p=dropout, inplace=False),
-            conv_block(2 * nf, 2 * nf, activation=act),
+            conv_block(2 * nf, 2 * nf, activation=act, norm_type=norm_type),
         )
 
-        self.up1 = deconv_block(2 * nf, nf, activation=act)
+        self.up1 = deconv_block(2 * nf, nf, activation=act, norm_type=norm_type)
 
         final_layer = get_activation(final)
 
         self.conv7_k = nn.Sequential(
-            conv_block(nf, out_channels, activation=final_layer),
+            conv_block(nf, out_channels, activation=final_layer, norm_type=norm_type),
         )
 
         self.conv7_g = nn.Sequential(
-            conv_block(nf, out_channels, activation=final_layer),
+            conv_block(nf, out_channels, activation=final_layer, norm_type=norm_type),
         )
 
         #if NoTanh:
@@ -130,7 +186,7 @@ class Generator(nn.Module):
 
 
 if __name__ == '__main__':
-    g = Generator(n_channels=3, batch_norm=False, final='tanh')
+    g = Generator(n_channels=3, final='tanh')
     #from torchsummary import summary
     from utils.data_utils import print_num_of_parameters
     print_num_of_parameters(g)

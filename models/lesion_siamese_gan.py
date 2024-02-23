@@ -294,6 +294,7 @@ class GAN(BaseModel):
             batch['img'] = reshape_3d(batch['img'])
         oriX = batch['img'][0]
         oriY = batch['img'][1]
+        batch = oriX.shape[0]
 
         # decaying skip connection
         alpha = 0  # if always disconnected
@@ -305,11 +306,11 @@ class GAN(BaseModel):
 
         # reshape
         (B, C, X, Y) = outXz.shape
-        outXz = outXz.view(B//self.batch, self.batch, C, X, Y)
+        outXz = outXz.view(B // batch, batch, C, X, Y)
         outXz = outXz.permute(1, 2, 3, 4, 0)
         outXz = self.pool(outXz)[:, :, 0, 0, 0]
 
-        outYz = outYz.view(B//self.batch, self.batch, C, X, Y)
+        outYz = outYz.view(B // batch, batch, C, X, Y)
         outYz = outYz.permute(1, 2, 3, 4, 0)
         outYz = self.pool(outYz)[:, :, 0, 0, 0]
 

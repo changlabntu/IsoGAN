@@ -205,11 +205,6 @@ def test_eval_set_manual2():
     xA = []
     xB = []
 
-    net = torch.load(ckpt, map_location='cpu')
-    net = net.cuda()
-    net.classifier = net.projection
-    net = net.eval()
-
     for i, x in tqdm(enumerate(eval_loader)):
         a, b = x['img']
         ab = torch.cat([a, b], 0)
@@ -243,7 +238,8 @@ labels = (x.loc[x['SIDE'] == 'RIGHT']['V$$WOMKP#']).values > (x.loc[x['SIDE'] ==
 # Model
 ckpt_path = '/media/ExtHDD01/logscls/'
 
-for ckpt in sorted(glob.glob('/media/ExtHDD01/logs/womac4/siamese_gan/00/checkpoints/net_g*.pth'))[2:3]:
+#for ckpt in sorted(glob.glob('/media/ExtHDD01/logs/womac4/siamese_gan/00/checkpoints/net_g*.pth'))[2:3]:
+for ckpt in sorted(glob.glob('/media/ExtHDD01/logs/womac4/siamese_gan/nonb4/checkpoints/net_g*.pth'))[1:]:
     print(ckpt)
     net = torch.load(ckpt, map_location='cpu')
     net = net.cuda()
@@ -272,7 +268,7 @@ for ckpt in sorted(glob.glob('/media/ExtHDD01/logs/womac4/siamese_gan/00/checkpo
     eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
                        path='ap_bp',
                        opt=args, mode='test', index=test_index, filenames=True)
-    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=1, shuffle=False,
+    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=4, shuffle=False,
                              pin_memory=True)
 
 

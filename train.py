@@ -130,7 +130,7 @@ if __name__ == '__main__':
     eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
                        path=args.direction,
                        opt=args, mode='test', index=test_index, filenames=True)
-    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.batch_size, shuffle=False,
+    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=1, shuffle=False,
                              pin_memory=True)
 
     # preload
