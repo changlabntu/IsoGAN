@@ -72,7 +72,7 @@ if __name__ == '__main__':
     parser.add_argument('--trd', type=float, dest='trd', help='threshold of images')
     # Training
     parser.add_argument('-b', dest='batch_size', type=int, help='training batch size')
-    # parser.add_argument('--test_batch_size', type=int, help='testing batch size') # NOT IN USE?
+    parser.add_argument('--bt', dest='test_batch_size', type=int, help='testing batch size') # NOT IN USE?
     parser.add_argument('--n_epochs', type=int, help='# of iter at starting learning rate')
     parser.add_argument('--lr', type=float, help='initial learning rate f -or adam')
     parser.add_argument('--beta1', type=float, help='beta1 for adam. default=0.5')
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
                        path=args.direction,
                        opt=args, mode='test', index=test_index, filenames=True)
-    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=1, shuffle=False,
+    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.test_batch_size, shuffle=False,
                              pin_memory=True)
 
     # preload

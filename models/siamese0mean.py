@@ -110,6 +110,9 @@ class CenterLoss(nn.Module):
 class GAN(BaseModel):
     def __init__(self, hparams, train_loader, eval_loader, checkpoints):
         BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
+        #self.train_loader = train_loader
+        #self.eval_loader = eval_loader
+        print(len(self.eval_loader))
         # First, modify the hyper-parameters if necessary
         # Initialize the networks
         self.hparams.final = 'none'
@@ -145,8 +148,7 @@ class GAN(BaseModel):
             self.criterionNCE.append(PatchNCELoss(opt=hparams))  # .to(self.device))
 
         # global contrastive
-        self.batch = self.hparams.batch_size
-        self.pool = nn.AdaptiveMaxPool3d(output_size=(1, 1, 1))
+        #self.pool = nn.AdaptiveMaxPool3d(output_size=(1, 1, 1))
         #self.pool = nn.AdaptiveAvgPool3d(output_size=(1, 1, 1))
         self.triple = nn.TripletMarginLoss()
         if self.hparams.projection > 0:
@@ -207,6 +209,7 @@ class GAN(BaseModel):
 
         # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
         outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
+        #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
 
         # global contrastive
@@ -215,15 +218,18 @@ class GAN(BaseModel):
         self.outYz = outYz[-1]
 
         # reshape
+        batch = self.hparams.batch_size
         (BZ, C, X, Y) = self.outXz.shape
-        Z = BZ // self.batch
-        self.outXz = self.outXz.view(self.batch, Z, C, X, Y)
+        Z = BZ // batch
+        self.outXz = self.outXz.view(batch, Z, C, X, Y)
         self.outXz = self.outXz.permute(0, 2, 3, 4, 1)
-        self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
+        self.outXz = torch.mean(self.outXz, dim=(2, 3))
+        self.outXz, _ = torch.max(self.outXz, 2)
 
-        self.outYz = self.outYz.view(self.batch, Z, C, X, Y)
+        self.outYz = self.outYz.view(batch, Z, C, X, Y)
         self.outYz = self.outYz.permute(0, 2, 3, 4, 1)
-        self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
+        self.outYz = torch.mean(self.outYz, dim=(2, 3))
+        self.outYz, _ = torch.max(self.outYz, 2)
 
     def backward_g(self):
         loss_g = 0
@@ -269,33 +275,33 @@ class GAN(BaseModel):
             batch['img'] = reshape_3d(batch['img'])
         oriX = batch['img'][0]
         oriY = batch['img'][1]
-        batch = oriX.shape[0]
 
         # decaying skip connection
         alpha = 0  # if always disconnected
 
         # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
-        outXz = self.net_g(oriX, alpha=alpha, method='encode')[-1]
+        self.outXz = self.net_g(oriX, alpha=alpha, method='encode')[-1]
         #
-        outYz = self.net_g(oriY, alpha=alpha, method='encode')[-1]
+        self.outYz = self.net_g(oriY, alpha=alpha, method='encode')[-1]
 
         # reshape
-        (BZ, C, X, Y) = outXz.shape
+        batch = self.hparams.batch_size_test
+        (BZ, C, X, Y) = self.outXz.shape
         Z = BZ // batch
+        self.outXz = self.outXz.view(batch, Z, C, X, Y)
+        self.outXz = self.outXz.permute(0, 2, 3, 4, 1)
+        self.outXz = torch.mean(self.outXz, dim=(2, 3))
+        self.outXz, _ = torch.max(self.outXz, 2)
 
-        outXz = outXz.view(batch, Z, C, X, Y)
-        outXz = outXz.permute(0, 2, 3, 4, 1)
-        outXz = self.pool(outXz)[:, :, 0, 0, 0]
+        self.outYz = self.outYz.view(batch, Z, C, X, Y)
+        self.outYz = self.outYz.permute(0, 2, 3, 4, 1)
+        self.outYz = torch.mean(self.outYz, dim=(2, 3))
+        self.outYz, _ = torch.max(self.outYz, 2)
 
-        outYz = outYz.view(batch, Z, C, X, Y)
-        outYz = outYz.permute(0, 2, 3, 4, 1)
-        outYz = self.pool(outYz)[:, :, 0, 0, 0]
-
-        labels = ((torch.rand(outXz.shape[0]) > 0.5) / 1).long().cuda()
+        labels = ((torch.rand(self.outXz.shape[0]) > 0.5) / 1).long().cuda()
         flip = (labels - 0.5) * 2
-        flip = flip.unsqueeze(1).repeat(1, outXz.shape[1])
-        output = torch.multiply(flip, (outXz - outYz))
-
+        flip = flip.unsqueeze(1).repeat(1, self.outXz.shape[1])
+        output = torch.multiply(flip, (self.outXz - self.outYz))
         output = self.net_g.projection(output)
 
         loss, _ = self.loss_function(output, labels)

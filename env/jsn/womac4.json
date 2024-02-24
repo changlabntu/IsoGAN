@@ -36,7 +36,7 @@
             "epoch_count": 0,
             "epoch_load": 0,
             "n_epochs_decay": 100,
-            "lr_policy": "lambda",
+            "lr_policy": "cosine",
             "lr_decay_iters": 50,
             "lamb": 100,
             "legacy": false,
