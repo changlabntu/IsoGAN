@@ -114,13 +114,35 @@ class GAN(BaseModel):
         # Initialize the networks
         self.hparams.final = 'none'
         self.net_g, self.net_d = self.set_networks()
+        self.hparams.final = 'none'
+        self.net_gY, _ = self.set_networks()
         self.classifier = nn.Conv2d(256, 2, 1, stride=1, padding=0).cuda()
 
         # update names of the models for optimization
-        self.netg_names = {'net_g': 'net_g'}
+        self.netg_names = {'net_g': 'net_g', 'net_gY': 'net_gY', 'netF': 'netF'}
         self.netd_names = {'net_d': 'net_d'}
 
         self.oai = OaiSubjects(self.hparams.dataset)
+
+        if hparams.lbvgg > 0:
+            self.VGGloss = VGGLoss().cuda()
+
+        # CUT NCE
+        self.featDown = nn.MaxPool2d(kernel_size=self.hparams.fDown)  # extra pooling to increase field of view
+
+        netF = PatchSampleF(use_mlp=self.hparams.use_mlp, init_type='normal', init_gain=0.02, gpu_ids=[], nc=self.hparams.c_mlp)
+        self.netF = init_net(netF, init_type='normal', init_gain=0.02, gpu_ids=[])
+        feature_shapes = [x * self.hparams.ngf for x in [1, 2, 4, 8]]
+        self.netF.create_mlp(feature_shapes)
+
+        if self.hparams.fWhich == None:  # which layer of the feature map to be considered in CUT
+            self.hparams.fWhich = [1 for i in range(len(feature_shapes))]
+
+        print(self.hparams.fWhich)
+
+        self.criterionNCE = []
+        for nce_layer in range(4):  # self.nce_layers:
+            self.criterionNCE.append(PatchNCELoss(opt=hparams))  # .to(self.device))
 
         # global contrastive
         self.batch = self.hparams.batch_size
@@ -187,46 +209,35 @@ class GAN(BaseModel):
         outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
 
-        # image generation
-        outX = self.net_g(outXz, alpha=alpha, method='decode')
-        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
-        self.imgXY = combine(self.imgXY, self.oriX, method='mul')
-
         # global contrastive
         # use last layer
         self.outXz = outXz[-1]
         self.outYz = outYz[-1]
 
         # reshape
-        # (B * Z, C, H, W)
         (BZ, C, X, Y) = self.outXz.shape
         Z = BZ // self.batch
-
         self.outXz = self.outXz.view(self.batch, Z, C, X, Y)
         self.outXz = self.outXz.permute(0, 2, 3, 4, 1)
         self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
-
-        #self.outXz = self.outXz.view(Z, self.batch, C, X, Y)
-        #print((self.outXz[:, 0, ::].mean(), self.outXz[:, 1, ::].mean(), self.outXz[:, 2, ::].mean()))
-        #self.outXz = self.outXz.permute(1, 2, 3, 4, 0)
-        #self.outXz = self.pool(self.outXz)[:, :, 0, 0, 0]
 
         self.outYz = self.outYz.view(self.batch, Z, C, X, Y)
         self.outYz = self.outYz.permute(0, 2, 3, 4, 1)
         self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
 
     def backward_g(self):
+        loss_g = 0
         loss_dict = dict()
-        loss = 0
 
-        # adversarial
-        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
-        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
-        loss_ga = axy  # * 0.5 + axx * 0.5
-        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb
-
-        loss_dict['t_g'] = loss_g
-        loss += loss_g
+        # global contrastive
+        if 0:
+            loss_t = 0
+            loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
+            loss_t += self.triple(self.outYz[1:, ::], self.outYz[:1, ::], self.outXz[1:, ::])
+            loss_center = self.center(torch.cat([f for f in [self.outXz, self.outYz]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
+            loss_g += loss_t + loss_center
+            loss_dict['loss_t'] = loss_t
+            loss_dict['loss_center'] = loss_center
 
         # classification
         labels = ((torch.rand(self.outXz.shape[0]) > 0.5) / 1).long().cuda()
@@ -234,34 +245,22 @@ class GAN(BaseModel):
         flip = flip.unsqueeze(1).repeat(1, self.outXz.shape[1])
         output = torch.multiply(flip, (self.outXz - self.outYz))
         output = self.net_g.projection(output)
-        loss_cls, _ = self.loss_function(output, labels)
 
-        loss_dict['t_cls'] = loss_cls
-        loss += loss_cls
+        loss, _ = self.loss_function(output, labels)
+        loss_g += loss
 
-        loss_dict['sum'] = loss
+        loss_dict['t_cls'] = loss
+        loss_dict['sum'] = loss_g
 
         return loss_dict
 
     def backward_d(self):
-        # ADV(XY)-
-        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
-
-        # ADV(XX)-
-        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
-        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
-
-        # adversarial of xy (-) and y (+)
-        loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
-        # classify x (+) vs y (-)
-        loss_d = loss_da * self.hparams.adv
-
-        return {'sum': loss_d, 'da': loss_da}
+        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
 
     def validation_step(self, batch, batch_idx=0):
-        #z_init = np.random.randint(7)
-        #batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
-        #batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
+        z_init = np.random.randint(7)
+        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
+        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
         #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
         #print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
@@ -283,9 +282,6 @@ class GAN(BaseModel):
         # reshape
         (BZ, C, X, Y) = outXz.shape
         Z = BZ // batch
-
-        #self.outXz = self.outXz.view(self.batch, Z, C, X, Y) !!!!!
-        #self.outXz = self.outXz.permute(0, 2, 3, 4, 1) !!!!!
 
         outXz = outXz.view(batch, Z, C, X, Y)
         outXz = outXz.permute(0, 2, 3, 4, 1)

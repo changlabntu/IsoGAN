@@ -17,15 +17,17 @@ from networks.networks_cut import Normalize, init_net, PatchNCELoss
 from models.IsoGAN import PatchSampleF
 from utils.metrics_classification import ClassificationLoss, GetAUC
 
+
 class TripletCenterLoss(nn.Module):
     def __init__(self, margin=0, num_classes=2):
         super(TripletCenterLoss, self).__init__()
         self.margin = margin
         self.ranking_loss = nn.MarginRankingLoss(margin=margin)
-        self.centers = nn.Parameter(torch.randn(num_classes, 512))#.cuda()
+        self.centers = nn.Parameter(torch.randn(num_classes, 512))
 
     def forward(self, inputs, targets):
         batch_size = inputs.size(0)
+        print(batch_size)
         targets_expand = targets.view(batch_size, 1).expand(batch_size, inputs.size(1))
         centers_batch = self.centers.gather(0, targets_expand)  # centers batch
 
@@ -34,6 +36,7 @@ class TripletCenterLoss(nn.Module):
         inputs_bz = torch.stack([inputs] * batch_size).transpose(0, 1)
         dist = torch.sum((centers_batch_bz - inputs_bz) ** 2, 2).squeeze()
         dist = dist.clamp(min=1e-12).sqrt()  # for numerical stability
+        print(dist)
         # for each anchor, find the hardest positive and negative
         mask = targets.expand(batch_size, batch_size).eq(targets.expand(batch_size, batch_size).t())
         dist_ap, dist_an = [], []
@@ -41,8 +44,12 @@ class TripletCenterLoss(nn.Module):
             dist_ap.append(dist[i][mask[i]].max())  # mask[i]: positive samples of sample i
             dist_an.append(dist[i][mask[i] == 0].min())  # mask[i]==0: negative samples of sample i
 
-        dist_ap = torch.stack(dist_ap)
-        dist_an = torch.stack(dist_an)
+        for x in dist_ap:
+            print(x.shape)
+        for x in dist_an:
+            print(x.shape)
+        dist_ap = torch.cat(dist_ap)
+        dist_an = torch.cat(dist_an)
 
         # generate a new label y
         # compute ranking hinge loss
@@ -103,9 +110,6 @@ class CenterLoss(nn.Module):
 class GAN(BaseModel):
     def __init__(self, hparams, train_loader, eval_loader, checkpoints):
         BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
-        #self.train_loader = train_loader
-        #self.eval_loader = eval_loader
-        print(len(self.eval_loader))
         # First, modify the hyper-parameters if necessary
         # Initialize the networks
         self.hparams.final = 'none'
@@ -115,7 +119,7 @@ class GAN(BaseModel):
         self.classifier = nn.Conv2d(256, 2, 1, stride=1, padding=0).cuda()
 
         # update names of the models for optimization
-        self.netg_names = {'net_g': 'net_g'}
+        self.netg_names = {'net_g': 'net_g', 'netF': 'netF'}
         self.netd_names = {'net_d': 'net_d'}
 
         self.oai = OaiSubjects(self.hparams.dataset)
@@ -149,9 +153,7 @@ class GAN(BaseModel):
             self.center = CenterLoss(feat_dim=self.hparams.projection)
         else:
             self.center = CenterLoss(feat_dim=self.hparams.ngf * 8)
-        self.triplecenter = TripletCenterLoss()
-
-        self.net_g.classifier = nn.Linear(self.hparams.ngf * 8, 2).cuda()
+        self.tripletcenter = TripletCenterLoss()
 
         if self.hparams.projection > 0:
             self.net_g.projection = nn.Linear(self.hparams.ngf * 8, self.hparams.projection).cuda()
@@ -205,8 +207,12 @@ class GAN(BaseModel):
 
         # generating a mask by sigmoid to locate the lesions, turn out it's the best way for now
         outXz = self.net_g(self.oriX, alpha=alpha, method='encode')
-        #
         outYz = self.net_g(self.oriY, alpha=alpha, method='encode')
+
+        # image generation
+        outX = self.net_g(outXz, alpha=alpha, method='decode')
+        self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
+        self.imgXY = combine(self.imgXY, self.oriX, method='mul')
 
         # global contrastive
         # use last layer
@@ -224,19 +230,19 @@ class GAN(BaseModel):
         self.outYz = self.pool(self.outYz)[:, :, 0, 0, 0]
 
     def backward_g(self):
-        loss_g = 0
         loss_dict = dict()
+        loss = 0
+
+        # adversarial
+        axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
+        loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
+        loss_ga = axy  # * 0.5 + axx * 0.5
+        loss_g = loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb
+
+        loss_dict['t_g'] = loss_g
+        loss += loss_g
 
         # global contrastive
-        if 0:
-            featuresA = self.net_g.projection(self.outXz)
-            featuresB = self.net_g.projection(self.outYz)
-
-            loss_tc, _ = self.triplecenter(torch.cat([f for f in [featuresA - featuresB, featuresB - featuresA]], dim=0),
-                                      torch.FloatTensor([1] * featuresA.shape[0] + [0] * featuresA.shape[0]).type(torch.LongTensor).cuda())
-            loss_g += loss_tc
-            loss_dict['tc_t'] = loss_tc
-
         if 0:
             loss_t = 0
             loss_t += self.triple(self.outYz[:1, ::], self.outYz[1:, ::], self.outXz[:1, ::])
@@ -251,22 +257,35 @@ class GAN(BaseModel):
         flip = (labels - 0.5) * 2
         flip = flip.unsqueeze(1).repeat(1, self.outXz.shape[1])
         output = torch.multiply(flip, (self.outXz - self.outYz))
-        output = self.net_g.classifier(output)
-
+        output = self.net_g.projection(output)
         loss_cls, _ = self.loss_function(output, labels)
-        loss_g += loss_cls
-        loss_dict['cls_t'] = loss_cls
-        loss_dict['sum'] = loss_g
+
+        loss_dict['t_cls'] = loss_cls
+        loss += loss_cls
+
+        loss_dict['sum'] = loss
 
         return loss_dict
 
     def backward_d(self):
-        return {'sum': torch.nn.Parameter(torch.tensor(0.00)), 'da': torch.nn.Parameter(torch.tensor(0.00))}
+        # ADV(XY)-
+        axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
+
+        # ADV(XX)-
+        # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
+        ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
+
+        # adversarial of xy (-) and y (+)
+        loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
+        # classify x (+) vs y (-)
+        loss_d = loss_da * self.hparams.adv
+
+        return {'sum': loss_d, 'da': loss_da}
 
     def validation_step(self, batch, batch_idx=0):
-        z_init = np.random.randint(7)
-        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
-        batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
+        #z_init = np.random.randint(7)
+        #batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
+        #batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
 
         #self.all_names.append(batch['filenames'][0].split('/')[-1].split('.')[0])
         #print(batch['filenames'][0][0].split('/')[-1].split('.')[0])
@@ -275,6 +294,7 @@ class GAN(BaseModel):
             batch['img'] = reshape_3d(batch['img'])
         oriX = batch['img'][0]
         oriY = batch['img'][1]
+        batch = oriX.shape[0]
 
         # decaying skip connection
         alpha = 0  # if always disconnected
@@ -286,41 +306,30 @@ class GAN(BaseModel):
 
         # reshape
         (B, C, X, Y) = outXz.shape
-        outXz = outXz.view(B//self.batch, self.batch, C, X, Y)
+        outXz = outXz.view(B // batch, batch, C, X, Y)
         outXz = outXz.permute(1, 2, 3, 4, 0)
         outXz = self.pool(outXz)[:, :, 0, 0, 0]
 
-        outYz = outYz.view(B//self.batch, self.batch, C, X, Y)
+        outYz = outYz.view(B // batch, batch, C, X, Y)
         outYz = outYz.permute(1, 2, 3, 4, 0)
-        outYz = self.pool(outYz)[:, :, 0, 0, 0]
+        outYz = self.pool(outYz)[:,q :, 0, 0, 0]
 
-        # global contrastive
-        featuresA = self.net_g.projection(outXz)
-        featuresB = self.net_g.projection(outYz)
-
-        loss_tc, _ = self.triplecenter(torch.cat([f for f in [featuresA, featuresB]], dim=0),
-                                  torch.FloatTensor([1] * featuresA.shape[0] + [0] * featuresA.shape[0]).type(torch.LongTensor).cuda())
-        self.log('tc_v', loss_tc, on_step=False, on_epoch=True,
-                 prog_bar=True, logger=True, sync_dist=True)
-
-        # classification
         labels = ((torch.rand(outXz.shape[0]) > 0.5) / 1).long().cuda()
         flip = (labels - 0.5) * 2
         flip = flip.unsqueeze(1).repeat(1, outXz.shape[1])
         output = torch.multiply(flip, (outXz - outYz))
 
-        output = self.net_g.classifier(output)
+        output = self.net_g.projection(output)
 
         loss, _ = self.loss_function(output, labels)
 
-        loss_cls, _ = self.loss_function(output, labels)
-        self.log('cls_v', loss_cls, on_step=False, on_epoch=True,
+        self.log('v_cls', loss, on_step=False, on_epoch=True,
                  prog_bar=True, logger=True, sync_dist=True)
 
         # metrics
         self.all_label.append(labels.cpu())
         self.all_out.append(output.cpu().detach())
-        self.all_loss.append(loss_cls.detach().cpu().numpy())
+        self.all_loss.append(loss.detach().cpu().numpy())
 
         return loss
 
@@ -343,6 +352,7 @@ class GAN(BaseModel):
         self.all_loss = []
         #self.save_auc_csv(auc[0], self.epoch)
         return metrics
+
 
 
 
