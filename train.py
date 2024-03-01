@@ -116,22 +116,25 @@ if __name__ == '__main__':
     print(args)
 
     # Load Dataset and DataLoader
-    from env.custom_data_utils import customize_data_split
-
-    folder, train_index, test_index = customize_data_split(args=args)
+    #from env.custom_data_utils import customize_data_split
+    #folder, train_index, test_index = customize_data_split(args=args)
 
     train_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/train/',
                         path=args.direction,
-                        opt=args, mode='train', index=train_index, filenames=True)
+                        opt=args, mode='train', index=None, filenames=True)
 
     train_loader = DataLoader(dataset=train_set, num_workers=1, batch_size=args.batch_size, shuffle=True,
                               pin_memory=True, drop_last=True)
 
-    eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
-                       path=args.direction,
-                       opt=args, mode='test', index=test_index, filenames=True)
-    eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.test_batch_size, shuffle=False,
-                             pin_memory=True)
+    try:
+        eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
+                           path=args.direction,
+                           opt=args, mode='test', index=None, filenames=True)
+        eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.test_batch_size, shuffle=False,
+                                 pin_memory=True)
+    except:
+        eval_loader = None
+        print('No validation set')
 
     # preload
     if args.preload:
@@ -158,7 +161,10 @@ if __name__ == '__main__':
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1)
     print(args)
-    trainer.fit(net, train_loader, eval_loader)
+    if eval_loader is not None:
+        trainer.fit(net, train_loader, eval_loader)
+    else:
+        trainer.fit(net, train_loader)
 
     #train(net, args, train_set, eval_set, loss_function, metrics)
 
