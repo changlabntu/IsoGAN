@@ -155,10 +155,12 @@ class BaseModel(pl.LightningModule):
         netg_parameters = []
         for g in self.netg_names.keys():
             netg_parameters = netg_parameters + list(getattr(self, g).parameters())
+        print('Number of parameters in generator: ', sum(p.numel() for p in netg_parameters if p.requires_grad))
 
         netd_parameters = []
         for d in self.netd_names.keys():
             netd_parameters = netd_parameters + list(getattr(self, d).parameters())
+        print('Number of parameters in discriminator: ', sum(p.numel() for p in netd_parameters if p.requires_grad))
 
         self.optimizer_g = optim.Adam(netg_parameters, lr=self.hparams.lr, betas=(self.hparams.beta1, 0.999))
         self.optimizer_d = optim.Adam(netd_parameters, lr=self.hparams.lr, betas=(self.hparams.beta1, 0.999))

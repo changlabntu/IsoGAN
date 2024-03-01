@@ -285,7 +285,7 @@ class GAN(BaseModel):
         self.outYz = self.net_g(oriY, alpha=alpha, method='encode')[-1]
 
         # reshape
-        batch = self.hparams.batch_size_test
+        batch = self.hparams.test_batch_size
         (BZ, C, X, Y) = self.outXz.shape
         Z = BZ // batch
         self.outXz = self.outXz.view(batch, Z, C, X, Y)
