@@ -200,17 +200,20 @@ class BaseModel(pl.LightningModule):
             else:
                 return None
 
-
         if optimizer_idx == 1:
-            self.generation(batch)  # why there are two generation?
-            loss_g = self.backward_g()
-            for k in list(loss_g.keys()):
-                if k != 'sum':
-                    self.log(k, loss_g[k], on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-            return loss_g['sum']
+            if self.hparams.adv > 0:
+                self.generation(batch)  # why there are two generation?
+                loss_g = self.backward_g()
+                for k in list(loss_g.keys()):
+                    if k != 'sum':
+                        self.log(k, loss_g[k], on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                return loss_g['sum']
+            else:
+                return None
 
     def training_epoch_end(self, outputs):
-        #self.train_loader.dataset.shuffle_images()
+        self.train_loader.dataset.shuffle_images()
+        self.eval_loader.dataset.shuffle_images()
 
         # checkpoint
         if self.epoch % 20 == 0:

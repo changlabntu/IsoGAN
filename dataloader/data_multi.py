@@ -58,7 +58,7 @@ class MultiData(data.Dataset):
                                             filenames=filenames, index=index))
 
 
-    def shuffle_imagesXXX(self):
+    def shuffle_images(self):
         for set in self.subset:
             random.shuffle(set.orders)
 
