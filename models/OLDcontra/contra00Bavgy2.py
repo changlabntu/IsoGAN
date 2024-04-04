@@ -158,6 +158,9 @@ class GAN(BaseModel):
         parser.add_argument("--adv", dest='adv', type=float, default=1)
         parser.add_argument("--alpha", dest='alpha', type=int,
                             help='ending epoch for decaying skip connection, 0 for no decaying', default=0)
+        parser.add_argument("--lbt", dest='lbt', type=float, default=1)
+        parser.add_argument("--lbc", dest='lbc', type=float, default=1)
+        parser.add_argument("--lbtc", dest='lbtc', type=float, default=1)
         return parent_parser
 
     def flip_features(self, fx, fy):
@@ -208,6 +211,9 @@ class GAN(BaseModel):
         if self.hparams.adv > 0:
             self.imgXYc = self.pool_3d_features(self.imgXYc, batch)
 
+        # average the y feature
+        self.oriYc = torch.mean(self.oriYc, dim=0).unsqueeze(0).repeat(self.oriXc.shape[0], 1)
+
     def pool_3d_features(self, f, batch):
         (BZ, C, X, Y) = f.shape
         Z = BZ // batch
@@ -249,12 +255,15 @@ class GAN(BaseModel):
             # adversarial of xy (-) and y (+)
             loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
             # classify x (+) vs y (-)
-            loss_d == loss_da * self.hparams.adv
+            loss_d = loss_da * self.hparams.adv
             loss_dict['da'] = loss_da
 
         # classification
-        fA, fB, labels = self.flip_features(self.oriXc, self.oriYc)
-        output = self.classifier(fA - fB)
+        self.oriYcmean = torch.mean(self.oriYc, dim=0).unsqueeze(0).repeat(self.oriXc.shape[0], 1)
+        fA, fB, labels = self.flip_features(self.oriXc - self.oriYcmean , self.oriYc - self.oriYcmean)
+
+        labels = torch.cat([labels, 1 - labels], 0)
+        output = self.classifier(torch.cat([fA, fB], 0))
 
         loss_cls, _ = self.loss_function(output, labels)
         loss_d += loss_cls * self.hparams.lbcls
@@ -270,15 +279,28 @@ class GAN(BaseModel):
 
         # global contrastive
         loss_t = 0
-        loss_t += self.triple(oriXcp[:1, ::], oriXcp[1:, ::], oriYcp[:1, ::])
-        loss_t += self.triple(oriXcp[1:, ::], oriXcp[:1, ::], oriYcp[1:, ::])
-        loss_t += self.triple(oriYcp[:1, ::], oriYcp[1:, ::], oriXcp[:1, ::])
-        loss_t += self.triple(oriYcp[1:, ::], oriYcp[:1, ::], oriXcp[1:, ::])
-        loss_center = self.center(torch.cat([f for f in [oriXcp, oriYcp]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
-
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[1, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[2, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[3, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[0, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[2, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[3, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[0, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[1, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[3, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[0, ::], oriYcp[3, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[1, ::], oriYcp[3, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[2, ::], oriYcp[3, ::])
+        loss_t = loss_t / 12
+        loss_center = self.center(torch.cat([f for f in [oriXcp, oriYcp]], dim=0), torch.FloatTensor([1] * oriXcp.shape[0] + [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_tc, _ = self.tripletcenter(torch.cat([f for f in [oriXcp, oriYcp]], dim=0),
+                                        torch.FloatTensor([1] * oriXcp.shape[0] + [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
         loss_dict['t'] = loss_t
         loss_dict['c'] = loss_center
-        loss_d += loss_t + loss_center
+        loss_dict['tc'] = loss_tc
+        loss_d += loss_t * self.hparams.lbt + loss_center * self.hparams.lbc + loss_tc * self.hparams.lbtc
 
         loss_dict['t_cls'] = loss_cls
         loss_dict['sum'] = loss_d
@@ -308,8 +330,11 @@ class GAN(BaseModel):
         self.oriXc = self.pool_3d_features(self.oriXc, batch)
         self.oriYc = self.pool_3d_features(self.oriYc, batch)
 
-        fA, fB, labels = self.flip_features(self.oriXc, self.oriYc)
-        output = self.classifier(fA - fB)
+        # average y feature
+        self.oriYcmean = torch.mean(self.oriYc, dim=0).unsqueeze(0).repeat(self.oriXc.shape[0], 1)
+        fA, fB, labels = self.flip_features(self.oriXc - self.oriYcmean , self.oriYc - self.oriYcmean)
+        labels = torch.cat([labels, 1 - labels], 0)
+        output = self.classifier(torch.cat([fA, fB], 0))
 
         loss, _ = self.loss_function(output, labels)
 
@@ -319,20 +344,34 @@ class GAN(BaseModel):
         # global contrastive
         oriXcp = self.projection(self.oriXc)
         oriYcp = self.projection(self.oriYc)
+
+        # global contrastive
+        loss_t = 0
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[1, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[2, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[0, ::], oriXcp[3, ::], oriYcp[0, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[0, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[2, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[1, ::], oriXcp[3, ::], oriYcp[1, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[0, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[1, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[2, ::], oriXcp[3, ::], oriYcp[2, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[0, ::], oriYcp[3, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[1, ::], oriYcp[3, ::])
+        loss_t += self.triple(oriXcp[3, ::], oriXcp[2, ::], oriYcp[3, ::])
+        loss_t = loss_t / 12
+        loss_center = self.center(torch.cat([f for f in [oriXcp, oriYcp]], dim=0), torch.FloatTensor([1] * oriXcp.shape[0] + [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_tc, _ = self.tripletcenter(torch.cat([f for f in [oriXcp, oriYcp]], dim=0),
+                                        torch.FloatTensor([1] * oriXcp.shape[0] + [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
         loss_tc, _ = self.tripletcenter(torch.cat([f for f in [oriXcp, oriYcp]], dim=0),
                                   torch.FloatTensor([1] * oriXcp.shape[0] + [0] * oriYcp.shape[0]).type(torch.LongTensor).cuda())
-        self.log('v_tc', loss_tc, on_step=False, on_epoch=True,
-                 prog_bar=True, logger=True, sync_dist=True)
-
-        loss_t = 0
-        loss_t += self.triple(oriXcp[:1, ::], oriXcp[1:, ::], oriYcp[:1, ::])
-        loss_t += self.triple(oriXcp[1:, ::], oriXcp[:1, ::], oriYcp[1:, ::])
-        loss_t += self.triple(oriYcp[:1, ::], oriYcp[1:, ::], oriXcp[:1, ::])
-        loss_t += self.triple(oriYcp[1:, ::], oriYcp[:1, ::], oriXcp[1:, ::])
-        loss_center = self.center(torch.cat([f for f in [oriXcp, oriYcp]], dim=0), torch.FloatTensor([0, 0, 1, 1]).cuda())
         self.log('v_t', loss_t, on_step=False, on_epoch=True,
                  prog_bar=True, logger=True, sync_dist=True)
         self.log('v_c', loss_center, on_step=False, on_epoch=True,
+                 prog_bar=True, logger=True, sync_dist=True)
+        self.log('v_tc', loss_tc, on_step=False, on_epoch=True,
                  prog_bar=True, logger=True, sync_dist=True)
 
         # metrics

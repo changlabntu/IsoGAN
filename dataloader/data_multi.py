@@ -95,7 +95,7 @@ class PairedSlices(data.Dataset):
         self.images = list(reduce(set.intersection, [set(item) for item in image_list]))
 
         self.subjects = dict([(x, [x]) for x in self.images])
-        self.subjects_keys = sorted(self.subjects.keys())
+        self.orders = sorted(self.subjects.keys())
 
         # if no resize than resize = image size
         if self.opt.resize == 0:
@@ -150,7 +150,7 @@ class PairedSlices(data.Dataset):
         if self.index is not None:
             return len(self.index)
         else:
-            return len(self.subjects_keys)
+            return len(self.orders)
 
     def load_img(self, path):
         # loading image
@@ -183,7 +183,7 @@ class PairedSlices(data.Dataset):
 
         # add all the slices into the dict
         filenames = []
-        slices = sorted(self.subjects[self.subjects_keys[index]])  # get all the slices of this subject
+        slices = sorted(self.subjects[self.orders[index]])  # get all the slices of this subject
         for i in range(len(self.all_path)):  # loop over all the paths
             slices_per_path = [join(self.all_path[i], x) for x in slices]
             filenames = filenames + slices_per_path

@@ -10,6 +10,6 @@
 
 # CUDA_VISIBLE_DEVICES=0
 
-python train.py --jsn womac4 --prj MOAKS/contra/0 --models contra0 -b 2 --bt 2 --netG edalphand2 --dataset womac4 --nm 01 --ngf 32 --projection 32 --n_epochs 200  --direction ap_bp --save_d --alpha 1 --env runpod --lbcls 1
-python train.py --jsn womac4 --prj MOAKS/contra/A --models contraA -b 2 --bt 2 --netG edalphand2 --dataset womac4 --nm 01 --ngf 32 --projection 32 --n_epochs 200  --direction ap_bp --save_d --alpha 1 --env runpod --lbcls 1
-python train.py --jsn womac4 --prj MOAKS/contra/B --models contraB -b 2 --bt 2 --netG edalphand2 --dataset womac4 --nm 01 --ngf 32 --projection 32 --n_epochs 200  --direction ap_bp --save_d --alpha 1 --env runpod --lbcls 1
+#python train.py --jsn womac4 --prj MOAKSID/adv0/0catA --models contra0catA -b 2 --bt 2 --netG edalphand2 --dataset womac4 --nm 01 --ngf 32 --projection 32 --n_epochs 200  --direction ap_bp --save_d --alpha 1 --env runpod --lbcls 1 --adv 0
+
+python train.py --jsn womac4 --prj MOAKSID/contra00/00Bavgy_011 --models contra00Bavgy -b 4 --bt 4 --netG edalphand2 --dataset womac4 --nm 01 --ngf 32 --projection 32 --n_epochs 200 --direction ap_bp --save_d --alpha 1 --env runpod --lbcls 1 --adv 0 --lbt 0 --lbc 1 --lbtc 1a

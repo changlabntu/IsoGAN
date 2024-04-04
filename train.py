@@ -71,6 +71,7 @@ if __name__ == '__main__':
     parser.add_argument('--cmb', dest='cmb', help='method to combine the outputs to the original')
     parser.add_argument('--trd', type=float, dest='trd', help='threshold of images')
     # Training
+    parser.add_argument('--adv', type=float, default=1, help='weight for adversarial loss, 0 for no generator training')
     parser.add_argument('-b', dest='batch_size', type=int, help='training batch size')
     parser.add_argument('--bt', dest='test_batch_size', type=int, help='testing batch size') # NOT IN USE?
     parser.add_argument('--n_epochs', type=int, help='# of iter at starting learning rate')
@@ -154,7 +155,10 @@ if __name__ == '__main__':
     # Trainer
     checkpoints = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'checkpoints')
     os.makedirs(checkpoints, exist_ok=True)
+    #if eval_loader is not None:
     net = GAN(hparams=args, train_loader=train_loader, eval_loader=eval_loader, checkpoints=checkpoints)
+    #else:
+    #net = GAN(hparams=args, train_loader=train_loader, checkpoints=checkpoints)
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
                          max_epochs=args.n_epochs + 1,  # progress_bar_refresh_rate=20,
                          logger=logger,

@@ -122,15 +122,35 @@ class GAN(BaseModel):
             print('Number of parameters requires_grad of self.cls: ', sum(p.numel() for p in self.cls.parameters() if p.requires_grad))
 
         if self.hparams.projection > 0:
-            self.projection = nn.Linear(self.hparams.ngf * 8, self.hparams.projection).cuda()
+            self.projection = nn.Linear(256, self.hparams.projection).cuda()
 
-        self.classifier = nn.Linear(self.hparams.ngf * 8, 2).cuda()
+        self.classifier = nn.Linear(256, 2).cuda()
 
         # update names of the models for optimization
-        self.netg_names = {'net_g': 'net_g'}
+        self.netg_names = {'net_g': 'net_g', 'netF': 'netF'}
         self.netd_names = {'net_d': 'net_d', 'classifier': 'classifier', 'projection': 'projection'}
 
         self.oai = OaiSubjects(self.hparams.dataset)
+
+        if hparams.lbvgg > 0:
+            self.VGGloss = VGGLoss().cuda()
+
+        # CUT NCE
+        self.featDown = nn.MaxPool2d(kernel_size=self.hparams.fDown)  # extra pooling to increase field of view
+
+        netF = PatchSampleF(use_mlp=self.hparams.use_mlp, init_type='normal', init_gain=0.02, gpu_ids=[], nc=self.hparams.c_mlp)
+        self.netF = init_net(netF, init_type='normal', init_gain=0.02, gpu_ids=[])
+        feature_shapes = [x * self.hparams.ngf for x in [1, 2, 4, 8]]
+        self.netF.create_mlp(feature_shapes)
+
+        if self.hparams.fWhich == None:  # which layer of the feature map to be considered in CUT
+            self.hparams.fWhich = [1 for i in range(len(feature_shapes))]
+
+        print(self.hparams.fWhich)
+
+        self.criterionNCE = []
+        for nce_layer in range(4):  # self.nce_layers:
+            self.criterionNCE.append(PatchNCELoss(opt=hparams))  # .to(self.device))
 
         # global contrastive
         self.triple = nn.TripletMarginLoss()
@@ -153,11 +173,26 @@ class GAN(BaseModel):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("LitModel")
         parser.add_argument("--lbcls", dest='lbcls', type=float, default=1)
+        parser.add_argument("--lbcls2", dest='lbcls2', type=float, default=1)
         parser.add_argument('--num_patches', type=int, default=256, help='number of patches per layer')
         parser.add_argument("--projection", dest='projection', type=int, default=0)
+        parser.add_argument('--lbNCE', type=float, default=1.0, help='weight for NCE loss: NCE(G(X), X)')
+        parser.add_argument('--nce_includes_all_negatives_from_minibatch',
+                            type=bool, nargs='?', const=True, default=False,
+                            help='(used for single image translation) If True, include the negatives from the other samples of the minibatch when computing the contrastive loss. Please see models/patchnce.py for more details.')
+        parser.add_argument('--nce_T', type=float, default=0.07, help='temperature for NCE loss')
+        parser.add_argument('--use_mlp', action='store_true')
+        parser.add_argument("--c_mlp", dest='c_mlp', type=int, default=256, help='channel of mlp')
+        parser.add_argument("--fDown", dest='fDown', type=int, default=4)
+        parser.add_argument('--fWhich', nargs='+', help='which layers to have NCE loss', type=int, default=None)
         parser.add_argument("--adv", dest='adv', type=float, default=1)
         parser.add_argument("--alpha", dest='alpha', type=int,
                             help='ending epoch for decaying skip connection, 0 for no decaying', default=0)
+        parser.add_argument("--lbc", dest='lbc', type=float, default=1)
+        parser.add_argument("--lbtc", dest='lbtc', type=float, default=1)
+        parser.add_argument("--lbvgg", dest='lbvgg', type=float, default=0)
+        parser.add_argument("--lbl1", dest='lbl1', type=float, default=0)
+        parser.add_argument("--lbl1y", dest='lbl1y', type=float, default=1)
         return parent_parser
 
     def flip_features(self, fx, fy):
@@ -177,7 +212,7 @@ class GAN(BaseModel):
         return fA, fB, labels
 
     def generation(self, batch):
-        #cropz
+        # cropz
         z_init = np.random.randint(7)
         batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + 16]
         batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + 16]
@@ -195,11 +230,17 @@ class GAN(BaseModel):
             self.imgXY = nn.Sigmoid()(outX['out0'])  # mask 0 - 1
             self.imgXY = combine(self.imgXY, self.oriX, method='mul')  # i am using masking (0-1) here
 
+            outYz = self.net_g(self.oriY, alpha=self.hparams.alpha, method='encode')
+            outY = self.net_g(outYz, alpha=self.hparams.alpha, method='decode')
+            self.imgYY = nn.Sigmoid()(outY['out0'])  # mask 0 - 1
+            self.imgYY = combine(self.imgYY, self.oriY, method='mul')  # i am using masking (0-1) here
+
         # classification
         self.oriXc = self.net_d(self.oriX)[1]
         self.oriYc = self.net_d(self.oriY)[1]  # (B, 256, 16, 16)
         if self.hparams.adv > 0:
             self.imgXYc = self.net_d(self.imgXY)[1]
+            self.imgYYc = self.net_d(self.imgYY)[1]
 
         # reshape
         batch = self.hparams.batch_size
@@ -207,6 +248,7 @@ class GAN(BaseModel):
         self.oriYc = self.pool_3d_features(self.oriYc, batch)
         if self.hparams.adv > 0:
             self.imgXYc = self.pool_3d_features(self.imgXYc, batch)
+            self.imgYYc = self.pool_3d_features(self.imgYYc, batch)
 
     def pool_3d_features(self, f, batch):
         (BZ, C, X, Y) = f.shape
@@ -223,10 +265,67 @@ class GAN(BaseModel):
 
         if self.hparams.adv > 0:
             axy = self.add_loss_adv(a=self.imgXY, net_d=self.net_d, truth=True)
+            ayy = self.add_loss_adv(a=self.imgYY, net_d=self.net_d, truth=True)
+            loss_ga = axy * 0.5 + ayy * 0.5
+
             loss_l1 = self.add_loss_l1(a=self.imgXY, b=self.oriY)
-            loss_ga = axy  # * 0.5 + axx * 0.5
+            loss_l1Y = self.add_loss_l1(a=self.imgYY, b=self.oriY)
+
             loss_dict['loss_l1'] = loss_l1
-            loss_g += loss_ga * self.hparams.adv + loss_l1 * self.hparams.lamb
+            loss_dict['loss_l1Y'] = loss_l1Y
+            loss_g += loss_ga * self.hparams.adv + loss_l1Y * self.hparams.lbl1y + loss_l1 * self.hparams.lbl1
+
+            if self.hparams.lbvgg > 0:
+                loss_gvgg = self.VGGloss(torch.cat([self.imgXY] * 3, 1), torch.cat([self.oriY] * 3, 1))
+                loss_dict['vgg'] = loss_gvgg
+                loss_g += loss_gvgg * self.hparams.lbvgg
+            else:
+                loss_gvgg = 0
+
+            # classification X vs XY
+            fA, fB, labels = self.flip_features(self.oriXc, self.imgXYc)
+            output = self.classifier(fA - fB)
+
+            loss_cls, _ = self.loss_function(output, labels)
+            loss_dict['tg_cls'] = loss_cls
+            loss_g += loss_cls * self.hparams.lbcls2
+
+        # CUT NCE_loss
+        if self.hparams.lbNCE > 0:
+            # (Y, XY)
+            feat_q = self.net_g(self.imgYY, method='encode')
+            feat_k = self.net_g(self.imgXY, method='encode')
+
+            feat_q = [self.featDown(f) for f in feat_q]
+            feat_k = [self.featDown(f) for f in feat_k]
+
+            feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
+                                                None)  # get source patches by random id
+            feat_q_pool, _ = self.netF(feat_q, self.hparams.num_patches, sample_ids)  # use the ids for query target
+
+            total_nce_loss = 0.0
+            for f_q, f_k, crit, f_w in zip(feat_q_pool, feat_k_pool, self.criterionNCE, self.hparams.fWhich):
+                loss = crit(f_q, f_k) * f_w
+                total_nce_loss += loss.mean()
+            loss_nce = total_nce_loss / 4
+            loss_dict['loss_nce'] = loss_nce
+            loss_g += loss_nce * self.hparams.lbNCE
+
+        # global contrastive G
+        oriXcp = self.projection(self.oriXc)  # +
+        oriYcp = self.projection(self.oriYc)  # -
+        #imgXXcp = self.projection(self.imgXXc)  # +
+        imgXYcp = self.projection(self.imgXYc)  # -
+        imgYYcp = self.projection(self.imgYYc)  # -
+        loss_center = self.center(torch.cat([f for f in [oriXcp, imgYYcp, imgXYcp]], dim=0),
+                                  torch.FloatTensor(1 * [1] * oriXcp.shape[0] + 2 * [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_tc, _ = self.tripletcenter(torch.cat([f for f in [oriXcp, imgYYcp, imgXYcp]], dim=0),
+                                        torch.FloatTensor(1 * [1] * oriXcp.shape[0] + 2 * [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_dict['cg'] = loss_center
+        loss_dict['tcg'] = loss_tc
+        loss_g += loss_center * self.hparams.lbc + loss_tc * self.hparams.lbtc
 
         loss_dict['sum'] = loss_g
 
@@ -242,24 +341,42 @@ class GAN(BaseModel):
         if self.hparams.adv > 0:
             # ADV(XY)-
             axy = self.add_loss_adv(a=self.imgXY.detach(), net_d=self.net_d, truth=False)
-            # ADV(XX)-
-            # axx, _ = self.add_loss_adv_classify3d(a=self.imgXX, net_d=self.net_dX, truth_adv=False, truth_classify=False)
+            # ADV(YY)-
             ay = self.add_loss_adv(a=self.oriY.detach(), net_d=self.net_d, truth=True)
 
+            # ADV(XY)-
+            ayy = self.add_loss_adv(a=self.imgYY.detach(), net_d=self.net_d, truth=False)
+
             # adversarial of xy (-) and y (+)
-            loss_da = axy * 0.5 + ay * 0.5  # axy * 0.25 + axx * 0.25 + ax * 0.25 + ay * 0.25
+            loss_da = axy * 0.25 + ay * 0.5 + ayy * 0.25
             # classify x (+) vs y (-)
-            loss_d == loss_da * self.hparams.adv
+            loss_d = loss_da * self.hparams.adv
             loss_dict['da'] = loss_da
 
-        # classification
+        # classification X vs Y
         fA, fB, labels = self.flip_features(self.oriXc, self.oriYc)
         output = self.classifier(fA - fB)
 
         loss_cls, _ = self.loss_function(output, labels)
+        loss_dict['td_cls'] = loss_cls
         loss_d += loss_cls * self.hparams.lbcls
 
-        loss_dict['t_cls'] = loss_cls
+        # global contrastive D
+        oriXcp = self.projection(self.oriXc)  # +
+        oriYcp = self.projection(self.oriYc)  # -
+        #imgXXcp = self.projection(self.imgXXc)  # +
+        #imgXYcp = self.projection(self.imgXYc)  # -
+        #imgYYcp = self.projection(self.imgYYc)  # -
+        loss_center = self.center(torch.cat([f for f in [oriXcp, oriYcp]], dim=0),
+                                  torch.FloatTensor(1 * [1] * oriXcp.shape[0] + 1 * [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_tc, _ = self.tripletcenter(torch.cat([f for f in [oriXcp, oriYcp]], dim=0),
+                                        torch.FloatTensor(1 * [1] * oriXcp.shape[0] + 1 * [0] * oriYcp.shape[0]).type(
+                                            torch.LongTensor).cuda())
+        loss_dict['c'] = loss_center
+        loss_dict['tc'] = loss_tc
+        loss_d += loss_center * self.hparams.lbc + loss_tc * self.hparams.lbtc
+
         loss_dict['sum'] = loss_d
         return loss_dict
 
@@ -287,12 +404,25 @@ class GAN(BaseModel):
         self.oriXc = self.pool_3d_features(self.oriXc, batch)
         self.oriYc = self.pool_3d_features(self.oriYc, batch)
 
+        try:
+            if self.hparams.adv > 0:
+                self.imgXYc = self.net_d(self.imgXY)[-1]
+                self.imgXYc = self.pool_3d_features(self.imgXYc, batch)
+
+            # classification X vs XY
+            fA, fB, labels = self.flip_features(self.oriXc, self.imgXYc)
+            output = self.classifier(fA - fB)
+            loss, _ = self.loss_function(output, labels)
+            self.log('v_clsxxy', loss, on_step=False, on_epoch=True,
+                     prog_bar=True, logger=True, sync_dist=True)
+        except:
+            print('imgXYc not found')
+
+        # classification X vs Y
         fA, fB, labels = self.flip_features(self.oriXc, self.oriYc)
         output = self.classifier(fA - fB)
-
         loss, _ = self.loss_function(output, labels)
-
-        self.log('v_cls', loss, on_step=False, on_epoch=True,
+        self.log('v_clsxy', loss, on_step=False, on_epoch=True,
                  prog_bar=True, logger=True, sync_dist=True)
 
         # metrics
@@ -321,7 +451,6 @@ class GAN(BaseModel):
         self.all_loss = []
         #self.save_auc_csv(auc[0], self.epoch)
         return metrics
-
 
 
 

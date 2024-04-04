@@ -213,7 +213,10 @@ class BaseModel(pl.LightningModule):
 
     def training_epoch_end(self, outputs):
         self.train_loader.dataset.shuffle_images()
-        self.eval_loader.dataset.shuffle_images()
+        try:
+            self.eval_loader.dataset.shuffle_images()
+        except:
+            pass
 
         # checkpoint
         if self.epoch % 20 == 0:
@@ -396,3 +399,4 @@ class BaseModel(pl.LightningModule):
             if net is not None:
                 for param in net.parameters():
                     param.requires_grad = requires_grad
+

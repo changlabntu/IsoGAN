@@ -39,37 +39,37 @@ test_index = pmeffid
 
 # path
 source = os.environ.get('DATASET') + 'womac4/'
-a_full = sorted(glob.glob(source + 'full/ap/*'))
-b_full = sorted(glob.glob(source + 'full/bp/*'))
+a_full = sorted(glob.glob(source + 'full/a/*'))
+b_full = sorted(glob.glob(source + 'full/b/*'))
 
 # remove directories on womac4/train and womac4/val if they exist
 for folder in ['train', 'val']:
-    for subfolder in ['ap', 'bp']:
+    for subfolder in ['a', 'b']:
         try:
             shutil.rmtree(source + folder + '/' + subfolder)
         except:
             pass
 # make directories on womac4/train and womac4/val
 for folder in ['train', 'val']:
-    for subfolder in ['ap', 'bp']:
+    for subfolder in ['a', 'b']:
         os.makedirs(source + folder + '/' + subfolder, exist_ok=True)
 
 # copy files from womac4/full/ to womac4/train/ and womac4/val/
 for i in tqdm(train_index):
     for z in range(23*i, 23*(i+1)):
-        shutil.copy(a_full[z], source + 'train/ap/' + a_full[z].split('/')[-1])
-        shutil.copy(b_full[z], source + 'train/bp/' + b_full[z].split('/')[-1])
+        shutil.copy(a_full[z], source + 'train/a/' + a_full[z].split('/')[-1])
+        shutil.copy(b_full[z], source + 'train/b/' + b_full[z].split('/')[-1])
 
 for i in tqdm(test_index):
     for z in range(23*i, 23*(i+1)):
-        shutil.copy(a_full[z], source + 'val/ap/' + a_full[z].split('/')[-1])
-        shutil.copy(b_full[z], source + 'val/bp/' + b_full[z].split('/')[-1])
+        shutil.copy(a_full[z], source + 'val/a/' + a_full[z].split('/')[-1])
+        shutil.copy(b_full[z], source + 'val/b/' + b_full[z].split('/')[-1])
 
 # make sure there is no overlapping files between train and val
-a_train = sorted(glob.glob(source + 'train/ap/*'))
-b_train = sorted(glob.glob(source + 'train/bp/*'))
-a_val = sorted(glob.glob(source + 'val/ap/*'))
-b_val = sorted(glob.glob(source + 'val/bp/*'))
+a_train = sorted(glob.glob(source + 'train/a/*'))
+b_train = sorted(glob.glob(source + 'train/b/*'))
+a_val = sorted(glob.glob(source + 'val/a/*'))
+b_val = sorted(glob.glob(source + 'val/b/*'))
 assert len(set(a_train).intersection(set(a_val))) == 0
 assert len(set(b_train).intersection(set(b_val))) == 0
 print('Length of train and val subjects:', len(train_index), len(test_index))

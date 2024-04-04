@@ -10,8 +10,8 @@ load_dotenv('.env')
 
 
 class GAN(BaseModel):
-    def __init__(self, hparams, train_loader, test_loader, checkpoints):
-        BaseModel.__init__(self, hparams, train_loader, test_loader, checkpoints)
+    def __init__(self, hparams, train_loader, eval_loader, checkpoints):
+        BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
 
         self.net_g, self.net_d = self.set_networks()
         self.net_gXY = self.net_g
