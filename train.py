@@ -111,9 +111,7 @@ if __name__ == '__main__':
 
     # Finalize Arguments and create files for logging
     args.bash = ' '.join(sys.argv)
-    print(args)
     args = prepare_log(args)
-
     print(args)
 
     # Load Dataset and DataLoader
@@ -160,11 +158,10 @@ if __name__ == '__main__':
     #else:
     #net = GAN(hparams=args, train_loader=train_loader, checkpoints=checkpoints)
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
-                         max_epochs=args.n_epochs + 1,  # progress_bar_refresh_rate=20,
+                         max_epochs=args.n_epochs,  # progress_bar_refresh_rate=20,
                          logger=logger,
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1)
-    print(args)
     if eval_loader is not None:
         trainer.fit(net, train_loader, eval_loader)
     else:

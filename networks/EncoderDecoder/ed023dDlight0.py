@@ -85,7 +85,7 @@ def deconv3d_bn_block(in_channels, out_channels, use_upsample=True, kernel=4, st
                       activation=ACTIVATION):
     if use_upsample:
         up = nn.Sequential(
-            nn.Upsample(scale_factor=2),
+            nn.Upsample(scale_factor=(2, 2, 2)),
             nn.Conv3d(in_channels, out_channels, 3, stride=1, padding=1)
         )
     else:
@@ -115,8 +115,8 @@ class Generator(nn.Module):
         conv2_block = conv2d_bn_block if batch_norm else conv2d_block
         conv3_block = conv3d_bn_block if batch_norm else conv3d_block
 
-        max2_pool = nn.MaxPool2d(2)
-        self.max3_pool = nn.MaxPool3d(2)
+        self.max2_pool = nn.MaxPool2d(2)
+        self.max3_pool = nn.MaxPool3d((2, 2, 1))
         act = activation
 
         if mc:
@@ -126,25 +126,25 @@ class Generator(nn.Module):
 
         self.down0 = nn.Sequential(
             conv2_block(n_channels, nf, activation=act),
-            conv2_block(nf, nf, activation=act)
+            #conv2_block(nf, nf, activation=act)
         )
         self.down1 = nn.Sequential(
             #max2_pool,
             conv2_block(nf, 2 * nf, activation=act),
-            conv2_block(2 * nf, 2 * nf, activation=act),
+            #conv2_block(2 * nf, 2 * nf, activation=act),
         )
         self.down2 = nn.Sequential(
             #max2_pool,
             conv2_block(2 * nf, 4 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
-            conv2_block(4 * nf, 4 * nf, activation=act),
+            #conv2_block(4 * nf, 4 * nf, activation=act),
 
         )
         self.down3 = nn.Sequential(
             #max2_pool,
             conv2_block(4 * nf, 8 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
-            conv2_block(8 * nf, 8 * nf, activation=act),
+            #conv2_block(8 * nf, 8 * nf, activation=act),
         )
 
         self.up3 = deconv3d_bn_block(8 * nf, 4 * nf, activation=act)
@@ -152,13 +152,13 @@ class Generator(nn.Module):
         self.conv5 = nn.Sequential(
             conv3_block(4 * nf, 4 * nf, activation=act),  # 8
             nn.Dropout(p=dropout, inplace=False),
-            conv3_block(4 * nf, 4 * nf, activation=act),
+            #conv3_block(4 * nf, 4 * nf, activation=act),
         )
         self.up2 = deconv3d_bn_block(4 * nf, 2 * nf, activation=act)
         self.conv6 = nn.Sequential(
             conv3_block(2 * nf, 2 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
-            conv3_block(2 * nf, 2 * nf, activation=act),
+            #conv3_block(2 * nf, 2 * nf, activation=act),
         )
 
         self.up1 = deconv3d_bn_block(2 * nf, nf, activation=act)
@@ -212,12 +212,15 @@ if __name__ == '__main__':
     #from torchsummary import summary
     #from utils.data_utils import print_num_of_parameters
     #print_num_of_parameters(g)
-    f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
-    print(f[-1].shape)
+    #f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
+    #print(f[-1].shape)
+    #out = g(f[-1], method='decode')
+    #print(out['out0'].shape)
+
     f = g(torch.rand(1, 1, 128, 128, 16), method='encode')
     print(f[-1].shape)
-    upsample = torch.nn.Upsample(size=(16, 16, 16))
-    fup = upsample(f[-1])
-    print(fup.shape)
-    out = g(fup, method='decode')
-    print(out[0].shape)
+    #upsample = torch.nn.Upsample(size=(16, 16, 128))
+    #fup = upsample(f[-1])
+    #print(fup.shape)
+    out = g(f[-1], method='decode')
+    print(out['out0'].shape)

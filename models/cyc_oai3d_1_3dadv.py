@@ -1,14 +1,15 @@
 from models.base import BaseModel, combine
 import copy
 import torch
+import numpy as np
 
 
 class GAN(BaseModel):
     """
     There is a lot of patterned noise and other failures when using lightning
     """
-    def __init__(self, hparams, train_loader, test_loader, checkpoints):
-        BaseModel.__init__(self, hparams, train_loader, test_loader, checkpoints)
+    def __init__(self, hparams, train_loader, eval_loader, checkpoints):
+        BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
 
         self.net_g, self.net_d = self.set_networks()
 
@@ -32,6 +33,9 @@ class GAN(BaseModel):
         return output[0]
 
     def generation(self, batch):
+        z_init = np.random.randint(23 - self.hparams.cropz)
+        batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + self.hparams.cropz]
+
         self.ori = batch['img'][0]  # (B, C, X, Y, Z)
 
         ori = self.upsample(self.ori)  # (B, C, X, Y, Z)

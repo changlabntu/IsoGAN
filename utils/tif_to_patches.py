@@ -39,7 +39,7 @@ def tif_to_patches(**kwargs):
 
 def main(source, destination, dh, step, permute, trds):
     for i, (s, d) in enumerate(zip(source, destination)):
-        input = {'source': s + '.tif', 'destination': 'full/' + d + '/',
+        input = {'source': s + '.tif', 'destination': 'train/' + d + '/',
                  'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i]}
         tif_to_patches(**input)
 
@@ -76,13 +76,14 @@ def get_average(source, destination):
 #           destination=root + 'xyzorix6.tif',
 #           size=[50, -1, -1])
 
-root = '/workspace/Data/paired_images/longone/'
+#root = '/workspace/Data/paired_images/longone/'
 #root = '/media/ExtHDD01/Dataset/paired_images/longone/'
 
 if 1:
+    root = '/workspace/Data/x2404g102/'
     resampling(source=root + 'xyori.tif',
                destination=root + 'xyzori.tif',
-               size=[301 * 6, -1, -1])
+               size=[201 * 3, -1, -1])
     suffix = ''
     main(source=['xyzori' + suffix],
          destination=['zyori' + suffix],
@@ -107,8 +108,18 @@ if 0:
     slices = sorted(glob.glob('/media/ExtHDD01/BRC/3DIntestine/SCFA_SNCA/Dendrite/*'))
 
     cropped = []
-    for z in range(300, 800):
+    for z in range(700, 720):
         print(z)
         x = tiff.imread(slices[z])
-        x = x[5500-1024:5500+1024, 3700-1024:3700+1024]
+        x = x[5500-1024:5500+1024, 1700-1024:1700+1024]
         cropped.append(x)
+    cropped = np.stack(cropped, 0)
+    tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/longone/xyoriB.tif', cropped)
+
+if 0:
+    root = '/workspace/Data/x2404g102/'
+    #root = '/media/ExtHDD01/Dataset/paired_images/longdent/'
+    suffix = ''
+    main(source=['xyori' + suffix],
+         destination=['xyori' + suffix],
+         dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[None])

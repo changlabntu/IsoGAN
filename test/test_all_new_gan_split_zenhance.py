@@ -297,7 +297,7 @@ for prj_name in ['MOAKSID/idx/0', 'MOAKSID/idx/0tc', 'MOAKSID/idx/0vgg10',
         data = zenhance.__getitem__(s)
         imgs = data['img'][0]
         filenames = data['filenames']
-        for z in range(imgs.shape[3]):
+        for z in range(0, imgs.shape[3], 8):
             mask_all = []
             for mc in range(20):
                 ax, mask = get_xy(imgs[:, :, :, z].unsqueeze(0), alpha=1)
@@ -306,7 +306,8 @@ for prj_name in ['MOAKSID/idx/0', 'MOAKSID/idx/0tc', 'MOAKSID/idx/0vgg10',
             mask_all = torch.mean(mask_all, 0).squeeze(0)
 
             mean_diff = imgs[0, :, :, z] - torch.multiply(mask_all, imgs[0, :, :, z].detach().cpu())
+            print(mean_diff.min(), mean_diff.max())
 
             # normalize to 255
             mean_diff = (mean_diff * 255).numpy().astype(np.uint8)
-            tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/' + args.dataset + '/zenhance/amean/' + filenames[z].split('/')[-1], mean_diff)
+            tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/' + args.dataset + '/zenhance/amean2/' + filenames[z].split('/')[-1], mean_diff)
