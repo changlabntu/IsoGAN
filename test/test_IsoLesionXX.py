@@ -179,13 +179,23 @@ if 0:
     imagesc(mean_diff[0, 0, ::])
 
 
-def IsoLesion_lesion():
-    net = torch.load('/media/ExtHDD01/logs/womac4/IsoLesionE/0/checkpoints/net_g_model_epoch_140.pth',
+def lesion_using_gY_after_interpolation():
+
+    prj = '/IsoLesion/DshareZngf48mc/'
+    epoch = 400
+
+    net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu')).cuda()#.eval() # newly ran
-    net_y = torch.load('/media/ExtHDD01/logs/womac4/IsoLesionE/0/checkpoints/net_gy_model_epoch_140.pth',
+    net_y = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_gy_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu')).cuda()#.eval() # newly ran
-    l = sorted(glob.glob('/media/ExtHDD01/oaiout/IsoLesionE_0_e140/xy/*'))
-    destination = '/media/ExtHDD01/oaiout/IsoLesionE_0_e140/xymean/'
+    #l = sorted(glob.glob('/media/ExtHDD01/oaiout/IsoLesion_DshareZngf48_e200/xy/*'))
+
+    destination = '/media/ExtHDD01/oaiout/IsoLesion/DshareZngf48mc/'
+
+    l = sorted(glob.glob(destination + 'xy/*'))
+
+    os.makedirs(destination + 'diffmean', exist_ok=True)
+    os.makedirs(destination + 'diffsig', exist_ok=True)
 
     def get_xy(ax):
         z = net(ax.unsqueeze(4).cuda(), method='encode')
@@ -197,50 +207,67 @@ def IsoLesion_lesion():
         return ax, mask
 
     #for i in range(313, 314):
-    for i in range(0, 184):
+    #for i in [496]:#range(496, 497):
+    for i in range(184*2, 184*3):  # range(496, 497):
         x = tiff.imread(l[i])
         #x = (x - x.min()) / (x.max() - x.min())
         x = (x + 1) / 2
         x = torch.from_numpy(x).unsqueeze(0).unsqueeze(0).float().cuda()
         mask_all = []
-        for mc in range(20):
+        diff_all = []
+        for mc in range(100):
             ax, mask = get_xy(x)
             mask_all.append(mask.detach().cpu())
-        mask_all = torch.cat(mask_all, 0)
-        mask_all = torch.mean(mask_all, 0).squeeze(0)
 
-        mean_diff = x.detach().cpu() - torch.multiply(mask_all, x.detach().cpu())
-        print(mean_diff.min(), mean_diff.max())
+            diff = x.detach().cpu() - torch.multiply(mask, x.detach().cpu())
+            diff_all.append(diff.detach().cpu())
+
+        mask_all = torch.cat(mask_all, 0)
+        diff_all = torch.cat(diff_all, 0)
+
+        mask_mean = torch.mean(mask_all, 0).squeeze(0)
+        mask_var = torch.var(mask_all, 0).squeeze(0)
+        diff_mean = (x.detach().cpu() - torch.multiply(mask_mean, x.detach().cpu())).squeeze()
+        diff_sig = torch.div(diff_all.mean(0), diff_all.var(0) + 0.01).squeeze()
 
         #imagesc(mean_diff[0, 0, ::])
-        tiff.imwrite(destination + l[i].split('/')[-1], mean_diff[0, 0, ::].numpy())
+        #imagesc(diff_all.mean(0).squeeze())
+        #imagesc(diff_sig)
+        tiff.imwrite(destination + 'diffmean/' + l[i].split('/')[-1], diff_mean.numpy())
+        tiff.imwrite(destination + 'diffsig/' + l[i].split('/')[-1], diff_sig.numpy())
 
 
 def IsoLesion_interpolate():
 
-    original = False
-
     upsample = torch.nn.Upsample(size=(384, 384, 23 * 8))
 
-    #model = torch.load('/media/ExtHDD01/logs/womac43d/cyc_oai3d_1/23d_rotate/checkpoints/net_g_model_epoch_60.pth',
-    #                   map_location=torch.device('cpu'))#.eval() # CUT, 23d, rotate
-    #tag = '23d_rotate_60/'
-    model = torch.load('/media/ExtHDD01/logs/womac4/IsoLesionE/1/checkpoints/net_g_model_epoch_200.pth',
+    if 1:
+        suffix = 'X'
+        l = sorted(glob.glob('/media/ExtHDD01/Dataset/paired_images/womac43d/full/ab/*'))
+        irange = range(2, 3)
+    else:
+        suffix = 'diff'
+        l = sorted(glob.glob('/media/ExtHDD01/oai_isotropic_out/IsoLesion/DshareZngf48mc/fromdiffusion/*'))
+        irange = range(0, 1)
+
+    prj = '/IsoLesionF/0/'
+    epoch = 400
+
+    net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu'))#.eval() # newly ran
-    tag = 'IsoLesionE/'
+    netB = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_gB_model_epoch_' + str(epoch) + '.pth',
+                       map_location=torch.device('cpu'))#.eval() # newly ran
 
-    if original:
-        tag = 'original/'
-
-    destination = '/media/ExtHDD01/oaiout/' + tag
+    destination = '/media/ExtHDD01/oai_isotropic_out/' + prj
     # delete and create folders
-    os.makedirs(destination + '/xy', exist_ok=True)
-    os.makedirs(destination + '/yz', exist_ok=True)
-    os.makedirs(destination + '/xz', exist_ok=True)
 
-    l = sorted(glob.glob('/media/ExtHDD01/Dataset/paired_images/womac43d/full/ab/*'))
 
-    for i in tqdm(range(0, 1)):
+    os.makedirs(destination + 'xy' + suffix, exist_ok=True)
+    os.makedirs(destination + 'yz' + suffix, exist_ok=True)
+    os.makedirs(destination + 'xz' + suffix, exist_ok=True)
+
+
+    for i in tqdm(irange):
         filename = l[i].split('/')[-1].split('.')[0]
         x0 = tiff.imread(l[i])
         x0 = x0 / x0.max()
@@ -248,85 +275,96 @@ def IsoLesion_interpolate():
         #x0 = upsample(x0)
         x0 = (x0 - 0.5) * 2
 
-        if original:
-            out_all = x0.numpy()[0, 0, :, :, :]
-        else:
-            out_all = model(x0)['out1']
-            out_all = nn.Sigmoid()(out_all)
-            out_all = out_all.detach().cpu()
-            out_all = out_all.numpy()[0, 0, :, :, :]
+        outz = net(x0, method='encode')
 
-        # masking
-        x00 = (x0 * 0.5 + 0.5).numpy()[0, 0, ::]
-        out_all = x00 - np.multiply(out_all, x00)
+        out_all = net(outz[-1], method='decode')['out0']
+        #out_all = nn.Sigmoid()(out_all)
+        out_all = nn.Tanh()(out_all)
+        out_all = out_all.detach().cpu()
+        out_all0 = out_all.numpy()[0, 0, :, :, :]
+
+        out_all = netB(outz[-1], method='decode')['out0']
+        out_all = nn.Sigmoid()(out_all)
+        #out_all = nn.Tanh()(out_all)
+        out_all = out_all.detach().cpu()
+        out_all1 = out_all.numpy()[0, 0, :, :, :]
+        out_all0 = (out_all0 + 1) / 2
+        out_all = out_all0 - np.multiply(out_all0, out_all1)
 
         # reslice
         for z in range(out_all.shape[2]):
-            tiff.imwrite(destination + 'xy/'+ filename + '_' +str(z).zfill(3) + '.tif', out_all[:, :, z])
+            tiff.imwrite(destination + 'xy' + suffix + '/' + filename + '_' + str(z).zfill(3) + '.tif', out_all[:, :, z])
         for x in range(out_all.shape[0]):
-            tiff.imwrite(destination + 'yz/'+ filename + '_' +str(x).zfill(3) + '.tif', out_all[x, :, :])
+            tiff.imwrite(destination + 'yz'+ suffix + '/' +  filename + '_' +str(x).zfill(3) + '.tif', out_all[x, :, :])
         for y in range(out_all.shape[1]):
-            tiff.imwrite(destination + 'xz/'+ filename + '_' +str(y).zfill(3) + '.tif', out_all[:, y, :])
+            tiff.imwrite(destination + 'xz'+ suffix + '/' +  filename + '_' +str(y).zfill(3) + '.tif', out_all[:, y, :])
 
-def IsoLesion_interpolate_and_lesion():
 
-    original = False
+def draw_difference():
+    root = '/media/ExtHDD01/oai_isotropic_out/IsoLesion/DshareZngf48mc/'
+    xy = tiff.imread(root + 'xy.tif')
+    xydiff = tiff.imread(root + 'xydiff.tif')
 
+    diff = xy - xydiff
+    diff[diff < 0] = 0
+    tiff.imwrite(root + 'xydiffpos.tif', diff)
+
+def remove_last_after_dash(str):
+    return str[:str.rfind('_')]
+
+def norm_11(x):
+    x = (x - x.min()) / (x.max() - x.min())
+    x = (x - 0.5) * 2
+    return x
+
+
+def test_IsoLesion_interpolate(net, x0):
+    outz = net(x0, method='encode')
+    out_all = net(outz[-1], method='decode')['out0']
+    # out_all = nn.Sigmoid()(out_all)
+    #out_all = nn.Tanh()(out_all)
+    out_all = out_all.detach().cpu()
+    out_all0 = out_all.numpy()[0, 0, :, :, :]
+    return out_all0
+
+
+def overall():
     upsample = torch.nn.Upsample(size=(384, 384, 23 * 8))
 
-    #model = torch.load('/media/ExtHDD01/logs/womac43d/cyc_oai3d_1/23d_rotate/checkpoints/net_g_model_epoch_60.pth',
-    #                   map_location=torch.device('cpu'))#.eval() # CUT, 23d, rotate
-    #tag = '23d_rotate_60/'
-    model = torch.load('/media/ExtHDD01/logs/womac4/IsoLesionE/0/checkpoints/net_g_model_epoch_200.pth',
+    prj = '/IsoLesion/DshareZngf48mc/'
+    epoch = 400
+
+    net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu'))#.eval() # newly ran
-    tag = 'IsoLesionE/'
 
-    if original:
-        tag = 'original/'
 
-    destination = '/media/ExtHDD01/oaiout/' + tag
-    # delete and create folders
-    os.makedirs(destination + '/xy', exist_ok=True)
-    os.makedirs(destination + '/yz', exist_ok=True)
-    os.makedirs(destination + '/xz', exist_ok=True)
+    root_raw = '/media/ExtHDD01/Dataset/paired_images/womac4/val/a/'
+    root_dppm = '/media/ExtHDD01/oai_diffusion_result/aA/results/test/0/0/Out/'
 
-    l = sorted(glob.glob('/media/ExtHDD01/Dataset/paired_images/womac43d/full/ab/*'))
+    subjects = sorted(list(set([remove_last_after_dash(x.split('/')[-1]) for x in sorted(glob.glob(root_dppm + '*'))])))
 
-    for i in tqdm(range(0, 1)):
-        filename = l[i].split('/')[-1].split('.')[0]
-        x0 = tiff.imread(l[i])
-        x0 = x0 / x0.max()
-        x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
-        #x0 = upsample(x0)
-        x0 = (x0 - 0.5) * 2
-        #x0 = x0.cuda()
+    destination = '/media/ExtHDD01/oai_isotropic_out/Finalzied/'
 
-        out0 = model(x0)['out0']
-        out0 = nn.Tanh()(out0)
-        out0 = out0.detach().cpu()
-        out0 = out0.numpy()[0, 0, :, :, :]
+    for s in subjects[0:10]:
+        raw_list = sorted(glob.glob(root_raw + s + '*.tif'))
+        dppm_list = sorted(glob.glob(root_dppm + s + '*.tif'))
+
+        raw = np.stack([tiff.imread(x) for x in raw_list], 0)
+        dppm = np.stack([tiff.imread(x) for x in dppm_list], 0)
+
+        #raw = tiff.imread('/media/ExtHDD01/oai_isotropic_out/IsoLesion/DshareZngf48mc/fromdiffusion/out1.tif')
+
+        raw = norm_11(raw)
+        dppm = norm_11(dppm)
 
         if 0:
-            out1_all = []
-            for mc in range(20):
-                print(mc)
-                out1 = model(x0)['out1']
-                out1 = nn.Sigmoid()(out1)
-                out1 = out1.detach().cpu()
-                out1 = out1.numpy()[0, 0, :, :, :]
-                out1_all.append(out1)
-            out1_all = np.stack(out1_all, 3)
-            out1 = np.mean(out1_all, 3)
+            raw = torch.from_numpy(raw).unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
+            rawup = test_IsoLesion_interpolate(net, raw)
+            rawup = np.transpose(rawup, (2, 0, 1))
+            tiff.imwrite(destination + 'xup/' + s + '.tif', rawup)
 
-            # masking
-            x00 = (out0 * 0.5 + 0.5)
-            out1 = x00 - np.multiply(out1, x00)
+        dppm = torch.from_numpy(dppm).unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
+        dppmup = test_IsoLesion_interpolate(net, dppm)
+        dppmup = np.transpose(dppmup, (2, 0, 1))
+        tiff.imwrite(destination + 'dppmup/' + s + '.tif', dppmup)
 
-        # reslice
-        output = out0
-        for z in range(output.shape[2]):
-            tiff.imwrite(destination + 'xy/'+ filename + '_' +str(z).zfill(3) + '.tif', output[:, :, z])
-        for x in range(output.shape[0]):
-            tiff.imwrite(destination + 'yz/'+ filename + '_' +str(x).zfill(3) + '.tif', output[x, :, :])
-        for y in range(output.shape[1]):
-            tiff.imwrite(destination + 'xz/'+ filename + '_' +str(y).zfill(3) + '.tif', output[:, y, :])

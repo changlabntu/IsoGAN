@@ -6,7 +6,6 @@ class OaiSubjects():
     def __init__(self, dataset):
         self.df = pd.read_csv('env/csv/' + dataset + '.csv')
         self.df['ID'] = [str(x) for x in self.df['ID']]
-
     def labels_unilateral(self, filenames, mode='train'):
         df = self.df
         #ids = [x.split('/')[-1].split('_')[0] for x in filenames[0]]

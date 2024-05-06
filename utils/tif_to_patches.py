@@ -16,6 +16,8 @@ def tif_to_patches(**kwargs):
     (dz, dx, dy) = kwargs['dh']  # (64, 256, 256)
     (sz, sx, sy) = kwargs['step']
     trd = kwargs['trd']
+    norm = kwargs['norm']
+    prefix = kwargs['prefix']
 
     os.makedirs(root + destination, exist_ok=True)
     npy = tiff.imread(root + source)  # (Z, X, Y)
@@ -23,24 +25,31 @@ def tif_to_patches(**kwargs):
     if trd is not None:
         npy[npy > trd] = trd
 
+    if norm is not None:
+        if norm == '01':
+            npy = (npy - npy.min()) / (npy.max() - npy.min())
+        elif norm == '11':
+            npy = (npy - npy.min()) / (npy.max() - npy.min())
+            npy = (npy - 0.5) * 2
+
     for z in range(npy.shape[0] // sz):
         for x in range(npy.shape[1] // sx):
             for y in range(npy.shape[2] // sy):
                     volume = npy[z * dz : (z+1) * dz, x * dx : (x+1) * dx, y * dy : (y+1) * dy]
-                    print(volume.shape)
+                    print((volume.mean(), volume.std()))
                     if volume.shape == (dz, dx, dy):
                         if permute is not None:
                             volume = np.transpose(volume, permute)
                         for s in range(volume.shape[0]):
                             patch = volume[s, ::]
-                            tiff.imsave(root + destination + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
+                            tiff.imwrite(root + destination + prefix +str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
                                         '_' + str(s).zfill(4) + '.tif', patch)
 
 
-def main(source, destination, dh, step, permute, trds):
+def main(source, destination, dh, step, permute, trds, norm, prefix):
     for i, (s, d) in enumerate(zip(source, destination)):
         input = {'source': s + '.tif', 'destination': 'train/' + d + '/',
-                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i]}
+                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i], 'norm': norm, 'prefix': prefix}
         tif_to_patches(**input)
 
 
@@ -79,7 +88,7 @@ def get_average(source, destination):
 #root = '/workspace/Data/paired_images/longone/'
 #root = '/media/ExtHDD01/Dataset/paired_images/longone/'
 
-if 1:
+if 0:
     root = '/workspace/Data/x2404g102/'
     resampling(source=root + 'xyori.tif',
                destination=root + 'xyzori.tif',
@@ -117,9 +126,25 @@ if 0:
     tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/longone/xyoriB.tif', cropped)
 
 if 0:
-    root = '/workspace/Data/x2404g102/'
-    #root = '/media/ExtHDD01/Dataset/paired_images/longdent/'
+    root = '/workspace/Data/Dayu1/'
     suffix = ''
     main(source=['xyori' + suffix],
          destination=['xyori' + suffix],
-         dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[None])
+         dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11')
+
+if 0:
+    root = '/workspace/Data/DPM4X/'
+    suffix = ''
+    for s in ['3-2ROI000.tif', '3-2ROI002.tif', '3-2ROI006.tif', '3-2ROI008.tif']:
+        main(source=[s + suffix],
+             destination=['xyori' + suffix],
+             dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
+
+if 1:
+    root = '/workspace/Data/longone/'
+    suffix = ''
+    main(source=['ganoriginal' + suffix],
+         destination=['ganoriginl' + suffix],
+         dh=(64, 512, 512), step=(64, 512, 512), permute=None, trds=[80], norm='01', prefix='')
+
+#xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()
