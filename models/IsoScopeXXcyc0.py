@@ -38,7 +38,6 @@ class GAN(BaseModel):
         # coefficient for the identify loss
         parser.add_argument("--lambI", type=int, default=0.5)
         parser.add_argument("--uprate", type=int, default=4)
-        parser.add_argument("--nocyc", action='store_true')
         return parent_parser
 
     def test_method(self, net_g, img):
@@ -61,11 +60,10 @@ class GAN(BaseModel):
         goutz = self.net_g(self.Xup, method='encode')
         self.XupX = self.net_g(goutz[-1], method='decode')['out0']
 
-        if not self.hparams.nocyc:
-            self.XupXback = self.net_gback(self.XupX)['out0']
+        self.XupXback = self.net_gback(self.XupX)['out0']
 
-    def get_xy_plane(self, x):  # (B, C, X, Y, Z)
-        return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]  # (Z, C, X, Y, B)
+    def get_xy_plane(self, x):
+        return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]
 
     def adv_loss_six_way(self, x, net_d, truth):
         loss = 0
@@ -103,49 +101,34 @@ class GAN(BaseModel):
 
     def backward_g(self):
         loss_g = 0
-        loss_dict = {}
 
         axx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=True)
-        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate], b=self.oriX[:, :, :, :, :]) * self.hparams.lamb
-
-        loss_dict['axx'] = axx
         loss_g += axx
-        loss_dict['l1'] = loss_l1
-        loss_g += loss_l1
 
-        if not self.hparams.nocyc:
-            gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
-            loss_dict['gback'] = gback
-            loss_g += gback
-            if self.hparams.lamb > 0:
-                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+        #loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate], b=self.oriX[:, :, :, :, :]) * self.hparams.lamb
+        #loss_g += loss_l1
 
-        loss_dict['sum'] = loss_g
+        gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
+        loss_g += gback
+        # Cyclic(XYX, X)
+        if self.hparams.lamb > 0:
+            loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
 
-        return loss_dict
+        return {'sum': loss_g, 'gxx': axx, 'gback': gback}#, 'l1': loss_l1}
 
     def backward_d(self):
-        loss_d = 0
-        loss_dict = {}
-
         dxx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=False)
+
         # ADV(X)+
         dx = self.add_loss_adv(a=self.get_xy_plane(self.oriX), net_d=self.net_d, truth=True)
 
-        loss_dict['dxx_x'] = dxx + dx
-        loss_d += dxx + dx
-
         # ADV dyy
-        if not self.hparams.nocyc:
-            dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
-            dy = self.adv_loss_six_way_y(self.oriX, truth=True)
+        dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
+        dy = self.adv_loss_six_way_y(self.oriX, truth=True)
 
-            loss_dict['dyy'] = dyy + dy
-            loss_d += dyy + dy
+        loss_d = dxx + dx + dyy + dy
 
-        loss_dict['sum'] = loss_d
-
-        return loss_dict
+        return {'sum': loss_d, 'dxx_x': dxx + dx, 'dyy': dyy + dy}
 
 
 # USAGE

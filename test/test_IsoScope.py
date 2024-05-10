@@ -22,10 +22,10 @@ def test_IsoScope():
 
     dataset = 'Dayu1'
 
-    #model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXX/cyc04roi/cyc0lb1/checkpoints/net_g_model_epoch_500.pth',
-    #                  map_location=torch.device('cpu')).cuda()#.eval() # newly ran
-    model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXX/cyc0/cyc0lb5norm/checkpoints/net_g_model_epoch_500.pth',
-                       map_location=torch.device('cpu')).cuda()#.eval() # newly ran
+    model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0/ngf64/checkpoints/net_g_model_epoch_100.pth',
+                      map_location=torch.device('cpu')).cuda()#.eval() # newly ran
+    #model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXX/cyc0/cyc0lb5norm/checkpoints/net_g_model_epoch_500.pth',
+    #                   map_location=torch.device('cpu')).cuda()#.eval() # newly ran
     x0 = tiff.imread('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/xyori.tif')
 
     uprate = 8
@@ -39,15 +39,15 @@ def test_IsoScope():
 
     ox = 128
     oy = 128
-    oz = 16
+    oz = 8
 
     dx = 256
     dy = 256
-    dz = 32
+    dz = 16
 
     sx = 128
     sy = 128
-    sz = 16
+    sz = 8
 
     stepx = dx - ox
     stepy = dy - oy
@@ -55,7 +55,7 @@ def test_IsoScope():
 
     all_z = []
     all_zg = []
-    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:9]:
+    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:19]:
         all_x = []
         all_xg = []
         for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[3:9]:

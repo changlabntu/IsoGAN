@@ -119,7 +119,7 @@ class GAN(BaseModel):
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("LitModel")
         # coefficient for the identify loss
-        parser.add_argument("--lambI", type=int, default=0.5)
+        parser.add_argument("--lambcyc", type=int, default=0)
         parser.add_argument("--uprate", type=int, default=4)
         parser.add_argument("--nocyc", action='store_true')
         parser.add_argument("--nocut", action='store_true')
@@ -211,7 +211,7 @@ class GAN(BaseModel):
             loss_dict['gback'] = gback
             loss_g += gback
             if self.hparams.lamb > 0:
-                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lambcyc
 
         if not self.hparams.nocut:
             # (X, XupX)
