@@ -112,7 +112,6 @@ if 0:
          dh=(64, 256, 256), step=(64, 256, 256), permute=None,  trds=[5, 20000])
 
 
-
 if 0:
     slices = sorted(glob.glob('/media/ExtHDD01/BRC/3DIntestine/SCFA_SNCA/Dendrite/*'))
 
@@ -135,7 +134,7 @@ if 0:
 if 0:
     root = '/workspace/Data/DPM4X/'
     suffix = ''
-    for s in ['3-2ROI000.tif', '3-2ROI002.tif', '3-2ROI006.tif', '3-2ROI008.tif']:
+    for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
         main(source=[s + suffix],
              destination=['xyori' + suffix],
              dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
@@ -143,8 +142,8 @@ if 0:
 if 1:
     root = '/workspace/Data/longone/'
     suffix = ''
-    main(source=['ganoriginal' + suffix],
-         destination=['ganoriginl' + suffix],
-         dh=(64, 512, 512), step=(64, 512, 512), permute=None, trds=[80], norm='01', prefix='')
+    main(source=['ganori' + suffix, 'ganyx' + suffix],
+         destination=['ganori' + suffix, 'ganyx' + suffix],
+         dh=(64, 512, 512), step=(64, 512, 512), permute=None, trds=[80, 500], norm='01', prefix='')
 
 #xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()

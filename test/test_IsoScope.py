@@ -12,6 +12,7 @@ def get_one_out(x0, model):
     x0 = x0.unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
 
     out_all = model(x0.cuda(), method='encode')[-1].cpu().detach()
+    print(out_all.shape)
     out_all = model(out_all.cuda(), method='decode')['out0'].cpu().detach()
 
     out_all = out_all.numpy()[0, 0, :, :, :]
@@ -22,7 +23,7 @@ def test_IsoScope():
 
     dataset = 'Dayu1'
 
-    model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0/ngf64/checkpoints/net_g_model_epoch_100.pth',
+    model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0/ngf32tryB/checkpoints/net_g_model_epoch_900.pth',
                       map_location=torch.device('cpu')).cuda()#.eval() # newly ran
     #model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXX/cyc0/cyc0lb5norm/checkpoints/net_g_model_epoch_500.pth',
     #                   map_location=torch.device('cpu')).cuda()#.eval() # newly ran
@@ -39,15 +40,13 @@ def test_IsoScope():
 
     ox = 128
     oy = 128
-    oz = 8
+    oz = 16
 
-    dx = 256
-    dy = 256
-    dz = 16
+<1>
 
     sx = 128
     sy = 128
-    sz = 8
+    sz = 16
 
     stepx = dx - ox
     stepy = dy - oy
@@ -55,13 +54,13 @@ def test_IsoScope():
 
     all_z = []
     all_zg = []
-    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:19]:
+    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:9]:
         all_x = []
         all_xg = []
-        for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[3:9]:
+        for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[:9]:
             all_y = []
             all_yg = []
-            for y in range(0 + sy, x0.shape[2] - dy + sy, stepy)[3:9]:
+            for y in range(0 + sy, x0.shape[2] - dy + sy, stepy)[:9]:
                 print(z, x, y)
 
                 patch = x0[z:z + dz, x:x + dx, y:y + dy]
@@ -83,6 +82,12 @@ def test_IsoScope():
                 out_all = np.stack(out_all, 0)
                 out_all = np.mean(out_all, 0)
 
+                # adjust the mean and std of out_all to match the input
+                out_all = out_all - out_all.mean()
+                out_all = out_all / out_all.std()
+                out_all = out_all * patch.std().numpy()
+                out_all = out_all + patch.mean().numpy()
+
                 all_yg.append(out_all[oz//2*uprate:-oz//2*uprate, ox//2:-ox//2, oy//2:-oy//2])
 
             all_y = np.concatenate(all_y, 2)
@@ -95,7 +100,6 @@ def test_IsoScope():
         all_zg.append(all_xg)
     all_z = np.concatenate(all_z, 0)
     all_zg = np.concatenate(all_zg, 0)
-
 
     tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/xx.tif',  (all_z))
     tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/xy.tif',  (all_zg))
