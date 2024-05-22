@@ -131,15 +131,15 @@ if 0:
          destination=['xyori' + suffix],
          dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11')
 
-if 0:
+if 1:
     root = '/workspace/Data/DPM4X/'
     suffix = ''
     for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
         main(source=[s + suffix],
-             destination=['xyori' + suffix],
-             dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
+             destination=['xyori512' + suffix],
+             dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
 
-if 1:
+if 0:
     root = '/workspace/Data/longone/'
     suffix = ''
     main(source=['ganori' + suffix, 'ganyx' + suffix],

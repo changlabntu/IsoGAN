@@ -12,7 +12,6 @@ def get_one_out(x0, model):
     x0 = x0.unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
 
     out_all = model(x0.cuda(), method='encode')[-1].cpu().detach()
-    print(out_all.shape)
     out_all = model(out_all.cuda(), method='decode')['out0'].cpu().detach()
 
     out_all = out_all.numpy()[0, 0, :, :, :]
@@ -20,13 +19,18 @@ def get_one_out(x0, model):
 
 
 def test_IsoScope():
-
     dataset = 'Dayu1'
 
-    model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0/ngf32tryB/checkpoints/net_g_model_epoch_900.pth',
-                      map_location=torch.device('cpu')).cuda()#.eval() # newly ran
-    #model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXX/cyc0/cyc0lb5norm/checkpoints/net_g_model_epoch_500.pth',
-    #                   map_location=torch.device('cpu')).cuda()#.eval() # newly ran
+    # no cyc
+    if 1:
+        model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0b/ngf32lb10cut0/checkpoints/net_g_model_epoch_1900.pth',
+                          map_location=torch.device('cpu')).cuda()#.eval() # newly ran
+        # with cyc
+    else:
+        model = torch.load(
+        '/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0/ngf32tryB/checkpoints/net_g_model_epoch_900.pth',
+        map_location=torch.device('cpu')).cuda()  # .eval() # newly ran
+
     x0 = tiff.imread('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/xyori.tif')
 
     uprate = 8
@@ -40,13 +44,15 @@ def test_IsoScope():
 
     ox = 128
     oy = 128
-    oz = 16
+    oz = 8
 
-<1>
+    dx = 256
+    dy = 256
+    dz = 16
 
     sx = 128
     sy = 128
-    sz = 16
+    sz = 8
 
     stepx = dx - ox
     stepy = dy - oy
@@ -54,13 +60,13 @@ def test_IsoScope():
 
     all_z = []
     all_zg = []
-    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:9]:
+    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:]:
         all_x = []
         all_xg = []
-        for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[:9]:
+        for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[3:9]:
             all_y = []
             all_yg = []
-            for y in range(0 + sy, x0.shape[2] - dy + sy, stepy)[:9]:
+            for y in range(0 + sy, x0.shape[2] - dy + sy, stepy)[3:9]:
                 print(z, x, y)
 
                 patch = x0[z:z + dz, x:x + dx, y:y + dy]

@@ -4,6 +4,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 from models.base import VGGLoss
+from networks.networks_cut import Normalize, init_net, PatchNCELoss
+
 
 class GAN(BaseModel):
     """
@@ -15,22 +17,15 @@ class GAN(BaseModel):
         self.hparams.final = 'tanh'
         self.net_g, self.net_d = self.set_networks()
         self.hparams.final = 'tanh'
-        self.net_gback, self.net_dzy = self.set_networks()
-        self.net_dzx = copy.deepcopy(self.net_dzy)
 
         # save model names
-        self.netg_names = {'net_g': 'net_g', 'net_gback': 'net_gback'}
-        self.netd_names = {'net_d': 'net_d', 'net_dzy': 'net_dzy', 'net_dzx': 'net_dzx'}
-        #self.netg_names = {'net_gy': 'net_gy'}
-        #self.netd_names = {'net_dy': 'net_dy'}
+        self.netg_names = {'net_g': 'net_g'}
+        self.netd_names = {'net_d': 'net_d'}
 
         # Finally, initialize the optimizers and scheduler
         self.configure_optimizers()
 
-        if self.hparams.cropz > 0:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropz * hparams.uprate), mode='trilinear')
-        else:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, 32 * hparams.uprate), mode='trilinear')
+        self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropz * hparams.uprate), mode='trilinear')
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -38,7 +33,15 @@ class GAN(BaseModel):
         # coefficient for the identify loss
         parser.add_argument("--lambI", type=int, default=0.5)
         parser.add_argument("--uprate", type=int, default=4)
-        parser.add_argument("--nocyc", action='store_true')
+        parser.add_argument('--num_patches', type=int, default=256, help='number of patches per layer')
+        parser.add_argument('--lbNCE', type=float, default=1.0, help='weight for NCE loss: NCE(G(X), X)')
+        parser.add_argument('--nce_includes_all_negatives_from_minibatch',
+                            type=bool, nargs='?', const=True, default=False,
+                            help='(used for single image translation) If True, include the negatives from the other samples of the minibatch when computing the contrastive loss. Please see models/patchnce.py for more details.')
+        parser.add_argument('--nce_T', type=float, default=0.07, help='temperature for NCE loss')
+        parser.add_argument('--use_mlp', action='store_true')
+        parser.add_argument("--c_mlp", dest='c_mlp', type=int, default=256, help='channel of mlp')
+        parser.add_argument('--fWhich', nargs='+', help='which layers to have NCE loss', type=int, default=None)
         return parent_parser
 
     def test_method(self, net_g, img):
@@ -47,22 +50,30 @@ class GAN(BaseModel):
         return output[0]
 
     def generation(self, batch):
-        if self.hparams.cropz > 0:
-            z_init = np.random.randint(batch['img'][0].shape[4] - self.hparams.cropz)
-            batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + self.hparams.cropz]
-        #batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + self.hparams.cropz]
+        x = batch['img'][0]
+        x = x.permute(0, 1, 3, 4, 2)  # (move the axis required enhaccement to the last dim)
+        # batch  (B, C, X, Y, Z)  (1, 1, 240, 240, 155)
+        # then should be cropped to (1, 1, 128, 128, 128)
 
-        self.oriX = batch['img'][0]  # (B, C, X, Y, Z) # original
-        #self.oriY = batch['img'][1]  # (B, C, X, Y, Z) # original
+        z_init = np.random.randint(x.shape[4] - self.hparams.cropz)
+        x_init = np.random.randint(x.shape[2] - self.hparams.crop)
+        y_init = np.random.randint(x.shape[3] - self.hparams.crop)
+        x = x[:, :, x_init:x_init + self.hparams.crop, y_init:y_init + self.hparams.crop, z_init:z_init + self.hparams.cropz]
 
+        # (original)
+
+        # downsample
+        x = x[:, :, :, :, ::uprate] # (we are using ::4 here, but nn.upsample is also possible)
+
+        # upsample
+        self.oriX = x  # (B, C, X, Y, Z) # original
         self.Xup = self.upsample(self.oriX)  # (B, C, X, Y, Z)
-        #self.Yup = self.upsample(self.oriY)  # (B, C, X, Y, Z)
 
-        goutz = self.net_g(self.Xup, method='encode')
-        self.XupX = self.net_g(goutz[-1], method='decode')['out0']
+        # (upsample finished)
 
-        if not self.hparams.nocyc:
-            self.XupXback = self.net_gback(self.XupX)['out0']
+        self.goutz = self.net_g(self.Xup, method='encode')
+        self.XupX = self.net_g(self.goutz[-1], method='decode')['out0']
+
 
     def get_xy_plane(self, x):  # (B, C, X, Y, Z)
         return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]  # (Z, C, X, Y, B)
@@ -113,13 +124,6 @@ class GAN(BaseModel):
         loss_dict['l1'] = loss_l1
         loss_g += loss_l1
 
-        if not self.hparams.nocyc:
-            gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
-            loss_dict['gback'] = gback
-            loss_g += gback
-            if self.hparams.lamb > 0:
-                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
-
         loss_dict['sum'] = loss_g
 
         return loss_dict
@@ -134,14 +138,6 @@ class GAN(BaseModel):
 
         loss_dict['dxx_x'] = dxx + dx
         loss_d += dxx + dx
-
-        # ADV dyy
-        if not self.hparams.nocyc:
-            dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
-            dy = self.adv_loss_six_way_y(self.oriX, truth=True)
-
-            loss_dict['dyy'] = dyy + dy
-            loss_d += dyy + dy
 
         loss_dict['sum'] = loss_d
 
