@@ -18,6 +18,7 @@ def tif_to_patches(**kwargs):
     trd = kwargs['trd']
     norm = kwargs['norm']
     prefix = kwargs['prefix']
+    ftr = kwargs['ftr']
 
     os.makedirs(root + destination, exist_ok=True)
     npy = tiff.imread(root + source)  # (Z, X, Y)
@@ -35,21 +36,27 @@ def tif_to_patches(**kwargs):
     for z in range(npy.shape[0] // sz):
         for x in range(npy.shape[1] // sx):
             for y in range(npy.shape[2] // sy):
+                    print(z, x, y)
                     volume = npy[z * dz : (z+1) * dz, x * dx : (x+1) * dx, y * dy : (y+1) * dy]
-                    print((volume.mean(), volume.std()))
+                    #print((volume.mean(), volume.std()))
+                    #print((volume.min(), volume.max()))
                     if volume.shape == (dz, dx, dy):
                         if permute is not None:
                             volume = np.transpose(volume, permute)
                         for s in range(volume.shape[0]):
                             patch = volume[s, ::]
-                            tiff.imwrite(root + destination + prefix +str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
-                                        '_' + str(s).zfill(4) + '.tif', patch)
+                            if patch.mean() > ftr:
+                                print(patch.mean())
+                                if norm is not None:
+                                    patch = patch.astype(np.float32)
+                                tiff.imwrite(root + destination + prefix +str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
+                                            '_' + str(s).zfill(4) + '.tif', patch)
 
 
-def main(source, destination, dh, step, permute, trds, norm, prefix):
+def main(source, destination, dh, step, permute, trds, norm, prefix, ftr):
     for i, (s, d) in enumerate(zip(source, destination)):
         input = {'source': s + '.tif', 'destination': 'train/' + d + '/',
-                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i], 'norm': norm, 'prefix': prefix}
+                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i], 'norm': norm, 'prefix': prefix, 'ftr': ftr}
         tif_to_patches(**input)
 
 
@@ -131,7 +138,7 @@ if 0:
          destination=['xyori' + suffix],
          dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11')
 
-if 1:
+if 0:
     root = '/workspace/Data/DPM4X/'
     suffix = ''
     for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
@@ -139,11 +146,12 @@ if 1:
              destination=['xyori512' + suffix],
              dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
 
-if 0:
-    root = '/workspace/Data/longone/'
+if 1:
+    root = '/workspace/Data/Fly0B/'
+    #root = '/media/ExtHDD01/Dataset/paired_images/Fly0B/'
     suffix = ''
-    main(source=['ganori' + suffix, 'ganyx' + suffix],
-         destination=['ganori' + suffix, 'ganyx' + suffix],
-         dh=(64, 512, 512), step=(64, 512, 512), permute=None, trds=[80, 500], norm='01', prefix='')
+    main(source=['xyori' + suffix],
+         destination=['xyoriftr' + suffix],
+         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[2000], norm='11', prefix='', ftr=-1)
 
 #xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()

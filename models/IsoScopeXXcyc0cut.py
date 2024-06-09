@@ -121,6 +121,7 @@ class GAN(BaseModel):
         # coefficient for the identify loss
         parser.add_argument("--lambI", type=int, default=0.5)
         parser.add_argument("--uprate", type=int, default=4)
+        parser.add_argument("--skipl1", type=int, default=1)
         parser.add_argument("--nocyc", action='store_true')
         parser.add_argument("--nocut", action='store_true')
         parser.add_argument('--num_patches', type=int, default=256, help='number of patches per layer')
@@ -199,7 +200,8 @@ class GAN(BaseModel):
         loss_dict = {}
 
         axx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=True)
-        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate], b=self.oriX[:, :, :, :, :]) * self.hparams.lamb
+        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate * self.hparams.skipl1],
+                                   b=self.oriX[:, :, :, :, ::self.hparams.skipl1]) * self.hparams.lamb
 
         loss_dict['axx'] = axx
         loss_g += axx

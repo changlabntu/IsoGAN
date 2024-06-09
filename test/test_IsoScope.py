@@ -23,7 +23,7 @@ def test_IsoScope():
 
     # no cyc
     if 1:
-        model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0b/ngf32lb10cut0/checkpoints/net_g_model_epoch_1900.pth',
+        model = torch.load('/media/ExtHDD01/logs/' + dataset + '/IsoScopeXXcyc0lb/ngf32lb10notrd/checkpoints/net_g_model_epoch_200.pth',
                           map_location=torch.device('cpu')).cuda()#.eval() # newly ran
         # with cyc
     else:
@@ -37,7 +37,7 @@ def test_IsoScope():
     if uprate > 1:
         upsample = torch.nn.Upsample(scale_factor=(uprate, 1, 1), mode='trilinear')
 
-    trd = 424
+    trd = 4240
     x0[x0 >= trd] = trd
     x0 = x0 / x0.max()
     x0 = (x0 - 0.5) * 2
@@ -60,7 +60,7 @@ def test_IsoScope():
 
     all_z = []
     all_zg = []
-    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:]:
+    for z in range(0 + sz, x0.shape[0] - dz + sz, stepz)[3:9]:
         all_x = []
         all_xg = []
         for x in range(0 + sx, x0.shape[1] - dx + sx, stepx)[3:9]:

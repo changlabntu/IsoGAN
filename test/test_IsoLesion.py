@@ -327,54 +327,63 @@ def expand_3d_to_2d_for_visualize(destination, suffix):
 
 
 if __name__ == "__main__":
-    root = '/media/ExtHDD01/oai_diffusion_interpolated/0506_400/'
-    ########################
-    # Copy ddpm to 2d output
-    ########################
-    if 1:
-        source = root + 'Out/'
-        destination = root + 'addpm2d/'
-        os.makedirs(destination, exist_ok=True)
-        save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(source), destination=destination)
-
-    #####################
-    # Copy a to 2d output
-    #####################
-    if 1:
-        source = '/media/ExtHDD01/Dataset/paired_images/womac4/full/a/'
-        destination = root + 'a2d/'
-        os.makedirs(destination, exist_ok=True)
-        save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(source)[0:500:5], destination=destination)
-
     #####################
     # 3D interpolation
     #####################
     # path
     # model
-    #prj = '/IsoLesion/DshareZngf48mc/'
-    #epoch = 400
-    prj = '/IsoScopeXX/cyc0lb1/'
-    epoch = 200
+    if 0:
+        prj = '/IsoLesion/DshareZngf48mc/'
+        epoch = 400
+        to_upsample = False
+    else:
+        prj = '/IsoScopeXX/cyc0lb1/'
+        epoch = 200
+        to_upsample = True
     net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu'))#.eval() # newly ran
-    if 1:
+
+
+    # output root
+    dppm_source = '/media/ExtHDD01/oai_diffusion_interpolated/diff0506/'
+    root = '/media/ExtHDD01/oai_diffusion_interpolated/cyc0lb1200_diff0506/'
+    ########################
+    # Copy ddpm to 2d output
+    ########################
+    if 0:
+        destination = root + 'addpm2d/'
+        os.makedirs(destination, exist_ok=True)
+        save_a_to_2d(source=dppm_source, subjects=get_subjects_from_list_of_2d_tifs(dppm_source), destination=destination)
+
+    #####################
+    # Copy a to 2d output
+    #####################
+    if 0:
+        source = '/media/ExtHDD01/Dataset/paired_images/womac4/full/a/'
+        destination = root + 'a2d/'
+        os.makedirs(destination, exist_ok=True)
+        save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(source)[0:500:5], destination=destination)
+
+
+    if 0:
         source = root + 'a2d/'
         destination = root + 'a3d/'
         os.makedirs(destination, exist_ok=True)
-        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:10]
-        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=True)
+        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
+        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample)
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
 
-    if 1:
+    if 0:
         source = root + 'addpm2d/'
         destination = root + 'addpm3d/'
         os.makedirs(destination, exist_ok=True)
-        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:10]
-        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=True)
+        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
+        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample)
 
     #####################
     # Calculate difference
     #####################
-    if 1:
+    if 0:
         x_list = sorted(glob.glob(root + 'a2d/*'))
         y_list = sorted(glob.glob(root + 'addpm2d/*'))
         os.makedirs(root + 'difference2d/', exist_ok=True)
@@ -385,8 +394,49 @@ if __name__ == "__main__":
         os.makedirs(root + 'difference3d/', exist_ok=True)
         calculate_difference(x_list, y_list, destination='difference3d/')
 
-    if 1:
+    if 0:
         expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference2d/')
         expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference3d/')
         expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a2d/')
         expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
+
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm2d/')
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm3d/')
+
+
+    def seg_bone(source, destination):
+        os.makedirs(destination, exist_ok=True)
+        flist = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))]
+
+        #x = tiff.imread('/media/ExtHDD01/oai_diffusion_interpolated/DshareZngf48mc_0504/a2d/9000099_03.tif')
+        for f in flist:
+            print(f)
+            x = tiff.imread(source + f)
+            x = (x - x.min()) / (x.max() - x.min())
+            x = (x - 0.5) / 0.5
+            x = torch.from_numpy(x).unsqueeze(1).float()
+
+            bone = []
+            for z in range(x.shape[0]):
+                slice = x[z:z+1, :, :, :]
+                #slice = slice / slice.max()
+                #slice = (slice - 0.5) / 0.5
+                out = seg(slice.cuda()).detach().cpu()
+                out = torch.argmax(out, 1).squeeze()
+                out = (out > 0).numpy().astype(np.uint8)
+                bone.append(out)
+            bone = np.stack(bone, axis=0)
+            tiff.imwrite(destination + f, bone)
+
+
+    seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/atten_0706.pth').eval()
+    #seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/80.pth').eval()
+    seg_bone(root + 'a2d/', root + 'a2d_bone/')
+    seg_bone(root + 'addpm2d/', root + 'addpm2d_bone/')
+    #seg_bone(root + 'a3d/', root + 'a3d_bone/')
+
+    y_list = sorted(glob.glob(root + 'a2d_bone/*'))
+    #x_list = sorted(glob.glob(root + 'addpm2d_bone/*'))
+    #os.makedirs(root + 'difference2d_bone/', exist_ok=True)
+    #calculate_difference(x_list, y_list, destination='difference2d_bone/')
+

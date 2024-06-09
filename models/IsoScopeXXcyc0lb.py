@@ -60,7 +60,7 @@ class GAN(BaseModel):
         goutz = self.net_g(self.Xup, method='encode')
         self.XupX = self.net_g(goutz[-1], method='decode')['out0']
 
-        #self.XupXback = self.net_gback(self.XupX)['out0']
+        self.XupXback = self.net_gback(self.XupX)['out0']
 
     def get_xy_plane(self, x):
         return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]
@@ -82,11 +82,11 @@ class GAN(BaseModel):
         loss = loss / 6
         return loss
 
-    def adv_loss_six_way_y(self, x, truth):
+    def adv_loss_six_way_y(self, x, truth):  # (B, C, X, Y, Z)
         loss = 0
         loss += self.add_loss_adv(a=x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
                                         net_d=self.net_dzy, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
+        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Y, Z)
                                         net_d=self.net_dzy, truth=truth)
         loss += self.add_loss_adv(a=x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0],  # (Y, C, Z, X)
                                         net_d=self.net_dzx, truth=truth)
@@ -105,16 +105,18 @@ class GAN(BaseModel):
         axx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=True)
         loss_g += axx
 
+        #loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate], b=self.oriX[:, :, :, :, :]) * self.hparams.lamb
+        #loss_g += loss_l1
         loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate*4], b=self.oriX[:, :, :, :, ::4]) * self.hparams.lamb
         loss_g += loss_l1
 
-        #gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
-        #loss_g += gback
+        gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
+        loss_g += gback
         # Cyclic(XYX, X)
-        #if self.hparams.lamb > 0:
-        #    loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+        if self.hparams.lamb > 0:
+            loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
 
-        return {'sum': loss_g, 'gxx': axx}#, 'gback': gback}#, 'l1': loss_l1}
+        return {'sum': loss_g, 'gxx': axx, 'gback': gback}#, 'l1': loss_l1}
 
     def backward_d(self):
         dxx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=False)
@@ -123,12 +125,12 @@ class GAN(BaseModel):
         dx = self.add_loss_adv(a=self.get_xy_plane(self.oriX), net_d=self.net_d, truth=True)
 
         # ADV dyy
-        #dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
-        #dy = self.adv_loss_six_way_y(self.oriX, truth=True)
+        dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
+        dy = self.adv_loss_six_way_y(self.oriX, truth=True)
 
-        loss_d = dxx + dx #+ dyy + dy
+        loss_d = dxx + dx + dyy + dy
 
-        return {'sum': loss_d, 'dxx_x': dxx + dx}#, 'dyy': dyy + dy}
+        return {'sum': loss_d, 'dxx_x': dxx + dx, 'dyy': dyy + dy}
 
 
 # USAGE

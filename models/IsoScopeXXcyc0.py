@@ -82,11 +82,11 @@ class GAN(BaseModel):
         loss = loss / 6
         return loss
 
-    def adv_loss_six_way_y(self, x, truth):
+    def adv_loss_six_way_y(self, x, truth):  # (B, C, X, Y, Z)
         loss = 0
         loss += self.add_loss_adv(a=x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
                                         net_d=self.net_dzy, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
+        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Y, Z)
                                         net_d=self.net_dzy, truth=truth)
         loss += self.add_loss_adv(a=x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0],  # (Y, C, Z, X)
                                         net_d=self.net_dzx, truth=truth)
