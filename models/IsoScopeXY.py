@@ -200,8 +200,8 @@ class GAN(BaseModel):
         loss_dict = {}
 
         axx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=True)
-        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate * self.hparams.skipl1],
-                                   b=self.oriX[:, :, :, :, ::self.hparams.skipl1]) * self.hparams.lamb
+        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.uprate * self.hparams.skipl1],
+                                   b=self.Xup[:, :, :, :, ::self.uprate * self.hparams.skipl1]) * self.hparams.lamb
 
         loss_dict['axx'] = axx
         loss_g += axx
@@ -243,7 +243,7 @@ class GAN(BaseModel):
 
         dxx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=False)
         # ADV(X)+
-        dx = self.add_loss_adv(a=self.get_xy_plane(self.XupX[:, :, :, :, ::self.uprate]), net_d=self.net_d, truth=True)
+        dx = self.add_loss_adv(a=self.get_xy_plane(self.oriX), net_d=self.net_d, truth=True)
 
         loss_dict['dxx_x'] = dxx + dx
         loss_d += dxx + dx

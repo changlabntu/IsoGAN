@@ -19,7 +19,6 @@ def get_one_out(x0, model):
 
 
 
-
 def test_IsoScope(**kwargs):
     if 1:
         dataset = 'Fly0B'
@@ -29,8 +28,8 @@ def test_IsoScope(**kwargs):
         x0 = x0 / x0.max()
         x0 = (x0 - 0.5) * 2
 
-        prj = '/IsoScopeXXcutcyc/ngf32lb10/'
-        epoch = 300
+        prj = '/IsoScopeXY/ngf32lb10skip4/'
+        epoch = 400
         uprate = 1890 // 300
 
         model = torch.load('/media/ExtHDD01/logs/' + dataset + prj + '/checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
