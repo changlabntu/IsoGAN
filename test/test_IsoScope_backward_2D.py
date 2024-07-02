@@ -23,8 +23,7 @@ def reverse_log(x):
 
 
 #dx = 512; dy = 512; dz = 16; sx = 0; sy = 0; sz = 0; ox = 0; oy = 0; oz = 0
-def testing_over_roi(x0, x1, roi_name, model, dx=512, dy=512, dz=16, sx=0, sy=0, sz=0, ox=256, oy=256, oz=0):
-
+def testing_over_roi(x0, x1, model, dx=512, dy=512, dz=16, sx=0, sy=0, sz=0, ox=256, oy=256, oz=0):
     stepx = dx - ox
     stepy = dy - oy
     stepz = dz - oz
@@ -57,18 +56,7 @@ def trd_and_rescale(x0, trd):
 
 if __name__ == '__main__':
     dataset = 'Fly0B'
-    if 0:
-        model = torch.load(
-            '/media/ExtHDD01/logs/' + dataset + '/cyc4_1024/cutFoo/checkpoints/netGYX_model_epoch_180.pth',
-            map_location=torch.device('cpu')).cuda()  # .eval()
-    else:
-        model = torch.load(
-            '/media/ExtHDD01/logs/' + dataset + '/cyc4_1024/cutF/checkpoints/netGYX_model_epoch_200.pth',
-            map_location=torch.device('cpu')).cuda()  # .eval()
-
-    model = model.eval()
-
-    destination = '/media/ExtHDD01/Dataset/paired_images/' + dataset + '/cycout/'
+    destination = '/media/ExtHDD01/Dataset/paired_images/' + dataset + '/cycout2/'
 
     for roi_name in ['xyori'][:]:
         x0 = tiff.imread('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/' + roi_name + '.tif')
@@ -76,12 +64,64 @@ if __name__ == '__main__':
 
         x1 = tiff.imread('/media/ExtHDD01/Dataset/paired_images/' + dataset + '/' + 'xyft0' + '.tif')
         x1 = trd_and_rescale(x1, 2000)
-        #testing_over_roi(x0, roi_name, model)
 
-    patchx0 = x0[:, :, 250,-512:,:512].cuda()
-    patchx1 = x1[:, :, 250,-512:,:512].cuda()
-    out = model(torch.cat([patchx1, patchx0], 1))
-    imagesc(patchx0[:, :, 64:-64, 64:-64].squeeze().detach().cpu())
-    imagesc(out['out1'][:, :, 64:-64, 64:-64].squeeze().detach().cpu())
+    # model
+    model_name = '/cyc4_1024/cutF/'
+    epoch = 100
+    model = torch.load(
+        '/media/ExtHDD01/logs/' + dataset + model_name + 'checkpoints/netGXY_model_epoch_' + str(epoch) + '.pth',
+        map_location=torch.device('cpu')).cuda()  # .eval()
+    modelYX = torch.load(
+        '/media/ExtHDD01/logs/' + dataset + model_name + 'checkpoints/netGYX_model_epoch_' + str(epoch) + '.pth',
+        map_location=torch.device('cpu')).cuda().eval()
 
-    testing_over_roi(x0, x1, roi_name='', model=model)
+    patchx0 = x0[:, :, 250,-1024:,:1024].cuda()
+    patchx1 = x1[:, :, 250,-1024:,:1024].cuda()
+    #modelYX = modelYX.eval()
+    out = modelYX(torch.cat([patchx1, patchx0], 1))
+    dx = 128
+    imagesc(patchx0[:, :, dx:-dx, dx:-dx].squeeze().detach().cpu())
+    imagesc(out['out1'][:, :, dx:-dx, dx:-dx].squeeze().detach().cpu())
+
+    testing_over_roi(x0, x1, model=modelYX)
+
+    def test_forward():
+
+        model_name = '/cyc4_1024/cutF/'
+        epoch = 100
+
+        model = torch.load(
+            '/media/ExtHDD01/logs/' + dataset + model_name + 'checkpoints/netGXY_model_epoch_' + str(epoch) + '.pth',
+            map_location=torch.device('cpu')).cuda()  # .eval()
+        modelYX = torch.load(
+            '/media/ExtHDD01/logs/' + dataset + model_name + 'checkpoints/netGYX_model_epoch_' + str(epoch) + '.pth',
+            map_location=torch.device('cpu')).cuda()
+
+        #model = model.eval()
+        #modelYX = modelYX.eval()
+
+        list_ori = sorted(glob.glob('/media/ExtHDD01/Dataset/paired_images/Fly0B/cycout/yzori/*.tif'))
+        list_ft0 = sorted(glob.glob('/media/ExtHDD01/Dataset/paired_images/Fly0B/cycout/yzft0/*.tif'))
+
+        patch_ori = tiff.imread(list_ori[0])
+        patch_ft0 = tiff.imread(list_ft0[0])
+
+        patch_ori = torch.from_numpy(patch_ori).unsqueeze(0).unsqueeze(0).float().cuda()
+        patch_ft0 = torch.from_numpy(patch_ft0).unsqueeze(0).unsqueeze(0).float().cuda()
+
+        out = model(torch.cat([patch_ft0, patch_ori], 1))
+
+        out_ft0 = out['out0']
+        out_ori = out['out1']
+
+        imagesc(patch_ori.squeeze().detach().cpu())
+        imagesc(out_ori.squeeze().detach().cpu())
+        #imagesc(out_ft0.squeeze().detach().cpu())
+
+        out = modelYX(torch.cat([out_ft0, patch_ori], 1))
+        out_ft0 = out['out0']
+        out_ori = out['out1']
+
+        imagesc(out_ori.squeeze().detach().cpu())
+        imagesc(out_ft0.squeeze().detach().cpu())
+

@@ -93,7 +93,7 @@ class GeneratorResNet(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, input_shape, patch):
+    def __init__(self, input_shape, patch, ndf=64):
         super(Discriminator, self).__init__()
         assert patch in [4, 8, 16]
         print('Use ' + str(patch) + ' patch discriminator')
@@ -111,20 +111,20 @@ class Discriminator(nn.Module):
             return layers
 
         if 1:
-            layers = [*discriminator_block(channels, 64, normalize=False),
-                      *discriminator_block(64, 128)]
+            layers = [*discriminator_block(channels, ndf, normalize=False),
+                      *discriminator_block(ndf, ndf*2)]
 
             if (patch == 4) or (patch == 8):
-                layers = layers + [*discriminator_block(128, 128)]
+                layers = layers + [*discriminator_block(ndf*2, ndf*2)]
 
-            layers = layers + [*discriminator_block(128, 256)]
+            layers = layers + [*discriminator_block(ndf*2, ndf*4)]
 
             if patch == 4:
-                layers = layers + [*discriminator_block(256, 256)]
+                layers = layers + [*discriminator_block(ndf*4, ndf*4)]
 
-            layers = layers + [*discriminator_block(256, 512),
+            layers = layers + [*discriminator_block(ndf*4, ndf*8),
                     nn.ZeroPad2d((1, 0, 1, 0)),
-                    nn.Conv2d(512, 1, 4, padding=1)]
+                    nn.Conv2d(ndf*8, 1, 4, padding=1)]
 
             self.model = nn.Sequential(*layers)
         else:

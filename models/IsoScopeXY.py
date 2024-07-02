@@ -251,7 +251,7 @@ class GAN(BaseModel):
         # ADV dyy
         if not self.hparams.nocyc:
             dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
-            dy = self.adv_loss_six_way_y(self.oriX, truth=True)
+            dy = self.adv_loss_six_way_y(self.Xup, truth=True)
 
             loss_dict['dyy'] = dyy + dy
             loss_d += dyy + dy

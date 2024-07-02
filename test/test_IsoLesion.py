@@ -6,6 +6,7 @@ import networks, models
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
+import skimage.measure
 
 
 def test_d2t():
@@ -179,6 +180,50 @@ if 0:
     imagesc(mean_diff[0, 0, ::])
 
 
+    def seg_bone(source, destination, filter_area=False):
+        os.makedirs(destination, exist_ok=True)
+        flist = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))]
+
+        #x = tiff.imread('/media/ExtHDD01/oai_diffusion_interpolated/DshareZngf48mc_0504/a2d/9000099_03.tif')
+        for f in flist[:]:
+            print(f)
+            x = tiff.imread(source + f)
+            x = (x - x.min()) / (x.max() - x.min())
+            x = (x - 0.5) / 0.5
+            x = torch.from_numpy(x).unsqueeze(1).float()
+
+            bone = []
+            for z in range(x.shape[0]):
+                slice = x[z:z+1, :, :, :]
+                #slice = slice / slice.max()
+                #slice = (slice - 0.5) / 0.5
+                out = seg(slice.cuda()).detach().cpu()
+                out = torch.argmax(out, 1).squeeze()
+                out = (out > 0).numpy().astype(np.uint8)
+                bone.append(out)
+            bone = np.stack(bone, axis=0)
+            if filter_area:
+                bone = filter_out_secondary_areas(bone).astype(np.uint8)
+            tiff.imwrite(destination + f, bone)
+
+    def torch_downsample_then_upsample(x):
+        x = torch.from_numpy(x).unsqueeze(0).unsqueeze(0).float()
+        x = torch.nn.functional.interpolate(x, size=(23, 384, 384), mode='trilinear', align_corners=False)
+        x = torch.nn.functional.interpolate(x, size=(184, 384, 384), mode='trilinear', align_corners=False)
+        x = x.squeeze().numpy()
+        return x
+
+    def filter_out_secondary_areas(x):
+        x = skimage.measure.label(bone)
+        x0 = 0 * x
+        areas = np.bincount(x.flatten())
+        # top 3 areas:
+        top2 = np.argsort(areas)[::-1][1:3]
+        for t in top2:
+            x0 += (x == t)
+        return x0
+
+
 def lesion_using_gY_after_interpolation():
 
     prj = '/IsoLesion/DshareZngf48mc/'
@@ -241,53 +286,122 @@ def remove_last_after_underline(s):
     return s[:s.rfind('_')]
 
 
-def IsoLesion_interpolate(source, destination, subjects, net, to_upsample=False):
-
-    upsample = torch.nn.Upsample(size=(384, 384, 23 * 8))
+def IsoLesion_interpolate(source, destination, subjects, net, to_upsample=False, padding=False):
 
     for i in tqdm(range(len(subjects))):
+
         filename = subjects[i]
         x0 = tiff.imread(source + filename)
+
+        x0 = x0 / x0.max()
+
+        # crop Y axis
+        #x0 = x0[:, 16:-16, :]
 
         #load 2d
         #filename = subjects[i]
         #tif_list = sorted(glob.glob(source + subjects[i] + '*.tif'))
         #x0 = np.stack([tiff.imread(x) for x in tif_list], 0)
 
-        x0 = x0 / x0.max()
+        #x0[x0<=100] = 100
+
         x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
         #x0 = upsample(x0)
         x0 = (x0 - 0.5) * 2
 
+        #x0 = x0 * 0.7
+        #x0[x0 >=1]  = 1
+        #x0[x0 <=-1] = -1
+        #x0[0, 0, 0, :32, :] = 1
+        #x0[0, 0, 0, 32:, :] = -1
+
+        print(x0.shape)
+        #x0[x0<=-0.8] = -0.8
+
+        x0 = x0[:, :, :, :, :]
+
+        if padding:
+            pad0 = 0 * torch.ones((x0.shape[0], x0.shape[1], x0.shape[2], x0.shape[3], 2))
+            pad = 1 * torch.ones((x0.shape[0], x0.shape[1], x0.shape[2], x0.shape[3], 2))
+            x0 = torch.cat((pad, pad0, x0, pad0, pad), 4)
+
         if to_upsample:
+            upsample = torch.nn.Upsample(size=(x0.shape[2], x0.shape[3], x0.shape[4] * 8),mode='nearest')
             x0 = upsample(x0)
-        out_all = net(x0)['out0']
-        #out_all = nn.Sigmoid()(out_all)
-        #out_all = nn.Tanh()(out_all)
-        out_all = out_all.detach().cpu()
-        out_all = out_all[0, 0, :, :, :].numpy()
-        out_all = np.transpose(out_all, (2, 0, 1))
 
-        tiff.imwrite(destination + filename, out_all)
+        #out_all = test_once(x0, net)
+        #tiff.imwrite(destination + filename, out_all)
+
+        if 0:
+            o1 = []
+            o0 = []
+            o2 = []
+            for mc in range(1):
+                o1.append(test_once(x0[:, :, :, :, 64:-64], net))
+                o0.append(test_once(x0[:, :, :, :, :128], net))
+                o2.append(test_once(x0[:, :, :, :, -128:], net))
+            o1 = np.stack(o1, 3)
+            o0 = np.stack(o0, 3)
+            o2 = np.stack(o2, 3)
+            o1 = np.mean(o1, 3)
+            o0 = np.mean(o0, 3)
+            o2 = np.mean(o2, 3)
+
+            mean01 = o1[:64, :, :].mean()
+            mean12 = o1[64:, :, :].mean()
+
+            o0m = o0 - o0[-64:, :, :].mean() + mean01
+            o2m = o2 - o2[:64, :, :].mean() + mean12
+
+            # combine o0 and o1 with the overlapped area weighted by a linear function of x
+            w = np.linspace(0, 1, 64)
+            w = torch.from_numpy(w).float()
+            w = w.unsqueeze(1).unsqueeze(2).repeat(1, x0.shape[2], x0.shape[3]).numpy()
+
+            combineA = o0m[:64, :, :]
+            combineB = np.multiply(1 - w, o0m[64:, :, :]) + np.multiply(w, o1[:64, :, :])
+            combineC = o1[64:-64, :, :]
+            combineD = np.multiply(1 - w, o1[-64:, :, :]) + np.multiply(w, o2m[:64, :, :])
+            combineE = o2m[64:, :, :]
+
+            combine = np.concatenate((combineA, combineB, combineC, combineD, combineE), 0)
+        else:
+            combine = test_once(x0, net)
+
+        tiff.imwrite(destination + filename, combine)
 
 
-def calculate_difference(x_list, y_list, destination):
+def test_once(x0, net):
+    out_all = net(x0)['out0']
+    out_all = out_all.detach().cpu()
+    out_all = out_all[0, 0, :, :, :].numpy()
+    out_all = np.transpose(out_all, (2, 0, 1))
+    return out_all
+
+def calculate_difference(x_list, y_list, destination, mask_list=None):
     #root = '/media/ExtHDD01/oai_diffusion_result/'
     #x_list = sorted(glob.glob(root + 'a2d/*'))
     #y_list = sorted(glob.glob(root + 'addpm2d/*'))
 
-    norm = True
-
     for i in range(len(x_list)):
         x = tiff.imread(x_list[i])
-        if norm:
-            x = x / x.max()
-            #for z in range(x.shape[0]):
-            #    x[z, :, :] = (x[z, :, :] - x[z, :, :].min()) / (x[z, :, :].max() - x[z, :, :].min())
         y = tiff.imread(y_list[i])
+
+        #x = x / x.max()
+        #y = y / y.max()
+
+        x = (x - x.min()) / (x.max() - x.min())
+        y = (y - y.min()) / (y.max() - y.min())
+        #for z in range(x.shape[0]):
+        #    x[z, :, :] = (x[z, :, :] - x[z, :, :].min()) / (x[z, :, :].max() - x[z, :, :].min())
+        #    y[z, :, :] = (y[z, :, :] - y[z, :, :].min()) / (y[z, :, :].max() - y[z, :, :].min())
+
         difference = x - y
         difference[difference < 0] = 0
-        difference = (difference / 2 * 255).astype(np.uint8)
+        difference = difference / 1
+        #difference = (difference + 1) / 2
+        #difference = (difference - difference.min()) / (difference.max() - difference.min())
+        difference = (difference * 255).astype(np.uint8)
         tiff.imwrite(root + destination + x_list[i].split('/')[-1], difference)
 
 
@@ -304,26 +418,55 @@ def get_subjects_from_list_of_2d_tifs(source):
     subjects = sorted(list(set([remove_last_after_underline(x.split('/')[-1]) for x in l])))
     return subjects
 
+def to_8bit(x):
+    x = (x - x.min()) / (x.max() - x.min())
+    x = (x * 255).astype(np.uint8)
+    return x
 
-def expand_3d_to_2d_for_visualize(destination, suffix):
+def norm_11(x):
+    x = (x - x.min()) / (x.max() - x.min())
+    x = (x * 2) - 1
+    return x
+
+def expand_3d_to_2d_for_visualize(destination, suffix, png=False, upsample=None):
     #destination = root + 'expanded3d/'
     #suffix = 'difference2d/'
     source = root + suffix
     #os.makedirs(destination + 'xy' + suffix, exist_ok=True)
     os.makedirs(destination + 'zy' + suffix, exist_ok=True)
     os.makedirs(destination + 'zx' + suffix, exist_ok=True)
+    os.makedirs(destination + 'xy' + suffix, exist_ok=True)
 
     l = sorted(glob.glob(source + '*'))
-    for i in range(len(l)):
+    for i in tqdm(range(len(l))):
         x0 = tiff.imread(l[i])  # (Z, X, Y)
+        if upsample is not None:
+            x0 = norm_11(x0)  # ?????
+            x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
+            x0 = torch.nn.functional.interpolate(x0, scale_factor=(upsample, 1, 1), mode='trilinear', align_corners=False)
+            x0 = x0.squeeze().numpy()
+            #x0 = x0.astype(np.uint8)
+
         filename = l[i].split('/')[-1].split('.')[0]
         # reslice
-        #for z in range(x0.shape[0]):
-        #    tiff.imwrite(destination + 'xy' + suffix + filename + '_' + str(z).zfill(3) + '.tif', x0[z, :, :])
         for x in range(x0.shape[1]):
-            tiff.imwrite(destination + 'zy' + suffix + filename + '_' + str(x).zfill(3) + '.tif', np.transpose(x0[:, x, :], (1, 0)))
+            if not png:
+                tiff.imwrite(destination + 'zy' + suffix + filename + '_' + str(x).zfill(3) + '.tif', np.transpose(x0[:, x, :], (1, 0)))
+            else:
+                out = Image.fromarray(to_8bit(np.transpose(x0[:, x, :] , (1, 0))))
+                out.save(destination + 'zy' + suffix + filename + '_' + str(x).zfill(3) + '.png')
         for y in range(x0.shape[2]):
-            tiff.imwrite(destination + 'zx' + suffix + filename + '_' + str(y).zfill(3) + '.tif', np.transpose(x0[:, :, y], (1, 0)))
+            if not png:
+                tiff.imwrite(destination + 'zx' + suffix + filename + '_' + str(y).zfill(3) + '.tif', np.transpose(x0[:, :, y], (1, 0)))
+            else:
+                out = Image.fromarray(to_8bit(np.transpose(x0[:, :, y], (1, 0))))
+                out.save(destination + 'zx' + suffix + filename + '_' + str(y).zfill(3) + '.png')
+        for z in range(x0.shape[0]):
+            if not png:
+                tiff.imwrite(destination + 'xy' + suffix + filename + '_' + str(z).zfill(3) + '.tif', x0[z, :, :])
+            else:
+                out = Image.fromarray(to_8bit(x0[z, :, :]))
+                out.save(destination + 'xy' + suffix + filename + '_' + str(z).zfill(3) + '.png')
 
 
 if __name__ == "__main__":
@@ -334,19 +477,25 @@ if __name__ == "__main__":
     # model
     if 0:
         prj = '/IsoLesion/DshareZngf48mc/'
-        epoch = 400
-        to_upsample = False
-    else:
-        prj = '/IsoScopeXX/cyc0lb1/'
         epoch = 200
+        to_upsample = False
+    elif 0:
+        prj = '/IsoScopeXX/cyc0lb1skip4ndf32/'
+        epoch = 320
+        #prj = '/IsoScopeXX/cyc0lb1skip4ndf32randl1/'
+        #epoch = 300
         to_upsample = True
+    else:
+        prj = '/IsoScopeXX/cyc0lb1skip4ndf32nomc/'
+        epoch = 700
+        to_upsample = True
+
     net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu'))#.eval() # newly ran
 
-
     # output root
-    dppm_source = '/media/ExtHDD01/oai_diffusion_interpolated/diff0506/'
-    root = '/media/ExtHDD01/oai_diffusion_interpolated/cyc0lb1200_diff0506/'
+    dppm_source = '/media/ExtHDD01/oai_diffusion_interpolated/diff0504/'
+    root = '/media/ExtHDD01/oai_diffusion_interpolated/new/'
     ########################
     # Copy ddpm to 2d output
     ########################
@@ -364,14 +513,13 @@ if __name__ == "__main__":
         os.makedirs(destination, exist_ok=True)
         save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(source)[0:500:5], destination=destination)
 
-
-    if 0:
-        source = root + 'a2d/'
+    if 1:
+        source = '/media/ExtHDD01/oai_diffusion_interpolated/original/' + 'a2d/'
         destination = root + 'a3d/'
         os.makedirs(destination, exist_ok=True)
-        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
-        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample)
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
+        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:10]
+        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample, padding=False)
+        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
 
     if 0:
         source = root + 'addpm2d/'
@@ -380,63 +528,58 @@ if __name__ == "__main__":
         subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
         IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample)
 
+
     #####################
     # Calculate difference
     #####################
     if 0:
         x_list = sorted(glob.glob(root + 'a2d/*'))
         y_list = sorted(glob.glob(root + 'addpm2d/*'))
-        os.makedirs(root + 'difference2d/', exist_ok=True)
-        calculate_difference(x_list, y_list, destination='difference2d/')
-
+        destination = 'difference2d/'
+        os.makedirs(root + destination, exist_ok=True)
+        calculate_difference(x_list, y_list, destination=destination)
+    if 0:
         x_list = sorted(glob.glob(root + 'a3d/*'))
         y_list = sorted(glob.glob(root + 'addpm3d/*'))
-        os.makedirs(root + 'difference3d/', exist_ok=True)
-        calculate_difference(x_list, y_list, destination='difference3d/')
+        mask_list  = sorted(glob.glob(root + 'difference2d/*'))
+        destination = 'difference3d/'
+        os.makedirs(root + destination, exist_ok=True)
+        calculate_difference(x_list, y_list, destination=destination)
 
     if 0:
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference2d/')
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference3d/')
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a2d/')
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference2d/', upsample=8)
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference3d/')
+        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a2d/', upsample=8)
+        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
 
         #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm2d/')
         #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm3d/')
 
 
-    def seg_bone(source, destination):
-        os.makedirs(destination, exist_ok=True)
-        flist = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))]
+    if 0:
+        #seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/atten_0706.pth').eval()
+        #seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/80.pth').eval()
+        seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/dual_atten_0706.pth').eval()
+        seg_bone(root + 'a2d/', root + 'a2d_bone/')
+        #seg_bone(root + 'addpm2d/', root + 'addpm2d_bone/')
+        seg_bone(root + 'a3d/', root + 'a3d_bone/')
 
-        #x = tiff.imread('/media/ExtHDD01/oai_diffusion_interpolated/DshareZngf48mc_0504/a2d/9000099_03.tif')
-        for f in flist:
-            print(f)
-            x = tiff.imread(source + f)
-            x = (x - x.min()) / (x.max() - x.min())
-            x = (x - 0.5) / 0.5
-            x = torch.from_numpy(x).unsqueeze(1).float()
-
-            bone = []
-            for z in range(x.shape[0]):
-                slice = x[z:z+1, :, :, :]
-                #slice = slice / slice.max()
-                #slice = (slice - 0.5) / 0.5
-                out = seg(slice.cuda()).detach().cpu()
-                out = torch.argmax(out, 1).squeeze()
-                out = (out > 0).numpy().astype(np.uint8)
-                bone.append(out)
-            bone = np.stack(bone, axis=0)
-            tiff.imwrite(destination + f, bone)
-
-
-    seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/atten_0706.pth').eval()
-    #seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/80.pth').eval()
-    seg_bone(root + 'a2d/', root + 'a2d_bone/')
-    seg_bone(root + 'addpm2d/', root + 'addpm2d_bone/')
-    #seg_bone(root + 'a3d/', root + 'a3d_bone/')
-
-    y_list = sorted(glob.glob(root + 'a2d_bone/*'))
+    #y_list = sorted(glob.glob(root + 'a2d_bone/*'))
     #x_list = sorted(glob.glob(root + 'addpm2d_bone/*'))
     #os.makedirs(root + 'difference2d_bone/', exist_ok=True)
     #calculate_difference(x_list, y_list, destination='difference2d_bone/')
 
+    if 0:
+        root = '/media/ExtHDD01/oai_diffusion_interpolated/new/expanded3d/'
+        xlist = sorted(glob.glob(root + 'zxdifference3d/*'))
+        ylist = sorted(glob.glob(root + 'zxdifference2d/*'))
+
+        for (x, y) in zip(xlist, ylist):
+            x0 = tiff.imread(x)
+            y0 = tiff.imread(y)
+            print(x0.min(), x0.max(), y0.min(), y0.max())
+            x0 = x0 / 255
+            y0 = (y0 > 0) / 1
+            mul = np.multiply(x0, y0)
+            mul = (mul * 255).astype(np.uint8)
+            tiff.imwrite(x.replace('zxdifference3d', 'mul'), mul)

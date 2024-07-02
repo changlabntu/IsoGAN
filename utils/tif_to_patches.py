@@ -6,58 +6,59 @@ import torch
 import torch.nn as nn
 
 
-def tif_to_patches(**kwargs):
+def read_2d_tif_to_3d(xlist):
+    """
+    Read a list of 2D tif file and convert it to a 3D numpy array
+    """
+    #xlist = sorted(glob.glob(source + '/*'))
+    x = [tiff.imread(x) for x in xlist]
+    x = np.stack(x, 0)
+    return x
+
+
+def tif_to_patches(npy, **kwargs):
     """
     Convert a tif file to a folder of patches
     """
-    source = kwargs['source']
-    destination = kwargs['destination']
-    permute = kwargs['permute']
     (dz, dx, dy) = kwargs['dh']  # (64, 256, 256)
     (sz, sx, sy) = kwargs['step']
-    trd = kwargs['trd']
-    norm = kwargs['norm']
-    prefix = kwargs['prefix']
-    ftr = kwargs['ftr']
 
-    os.makedirs(root + destination, exist_ok=True)
-    npy = tiff.imread(root + source)  # (Z, X, Y)
+    os.makedirs(root + kwargs['destination'], exist_ok=True)
 
-    if trd is not None:
-        npy[npy > trd] = trd
+    if kwargs['trd'] is not None:
+        npy[npy > kwargs['trd']] = kwargs['trd']
 
-    if norm is not None:
-        if norm == '01':
+    if kwargs['norm'] is not None:
+        if kwargs['norm'] == '01':
             npy = (npy - npy.min()) / (npy.max() - npy.min())
-        elif norm == '11':
+        elif kwargs['norm'] == '11':
             npy = (npy - npy.min()) / (npy.max() - npy.min())
             npy = (npy - 0.5) * 2
 
     for z in range(npy.shape[0] // sz):
         for x in range(npy.shape[1] // sx):
             for y in range(npy.shape[2] // sy):
-                    print(z, x, y)
+                    #print(z, x, y)
                     volume = npy[z * dz : (z+1) * dz, x * dx : (x+1) * dx, y * dy : (y+1) * dy]
-                    #print((volume.mean(), volume.std()))
-                    #print((volume.min(), volume.max()))
                     if volume.shape == (dz, dx, dy):
-                        if permute is not None:
-                            volume = np.transpose(volume, permute)
+                        if kwargs['permute'] is not None:
+                            volume = np.transpose(volume, kwargs['permute'])
                         for s in range(volume.shape[0]):
                             patch = volume[s, ::]
-                            if patch.mean() > ftr:
-                                print(patch.mean())
-                                if norm is not None:
+                            if patch.mean() > kwargs['ftr']:
+                                #print(patch.mean())
+                                if kwargs['norm'] is not None:
                                     patch = patch.astype(np.float32)
-                                tiff.imwrite(root + destination + prefix +str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
-                                            '_' + str(s).zfill(4) + '.tif', patch)
+                                #tiff.imwrite(root + kwargs['destination'] + kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
+                                #            '_' + str(s).zfill(4) + '.tif', patch)
+                                tiff.imwrite(root + kwargs['destination'] + str(patch.mean()) + '.tif', patch)
 
 
-def main(source, destination, dh, step, permute, trds, norm, prefix, ftr):
-    for i, (s, d) in enumerate(zip(source, destination)):
-        input = {'source': s + '.tif', 'destination': 'train/' + d + '/',
-                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i], 'norm': norm, 'prefix': prefix, 'ftr': ftr}
-        tif_to_patches(**input)
+#def main(source, destination, dh, step, permute, trds, norm, prefix, ftr):
+#    for i, (s, d) in enumerate(zip(source, destination)):
+#        input = {'source': s + '.tif', 'destination': 'train/' + d + '/',
+#                 'permute': permute, 'dh': dh, 'step': step, 'trd': trds[i], 'norm': norm, 'prefix': prefix, 'ftr': ftr}
+#        tif_to_patches(**input)
 
 
 def resampling(source, destination, scale=None, size=None):
@@ -147,11 +148,43 @@ if 0:
              dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
 
 if 1:
-    root = '/workspace/Data/Fly0B/'
-    #root = '/media/ExtHDD01/Dataset/paired_images/Fly0B/'
+    #root = '/workspace/Data/Fly0B/'
+    root = '/media/ExtHDD01/Dataset/paired_images/Fly0B/'
     suffix = ''
-    main(source=['xyori' + suffix],
-         destination=['xyoriftr' + suffix],
-         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[2000], norm='11', prefix='', ftr=-1)
+    #main(source=['xyori' + suffix],
+    #     destination=['xyoriftr' + suffix],
+    #     dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[2000], norm='11', prefix='', ftr=-1)
+
+    #resampling(source=root + 'xyori.tif',
+    #           destination=root + 'xyzori8.tif',
+    #           size=[301 * 8, -1, -1])
+    npy = tiff.imread(root + 'xyzft0.tif')
+    npy = npy[-512:, -512:, :1024]
+    max_val = 8 # 2000
+    npy[npy > max_val] = max_val
+    npy = (npy - 0) / (max_val - 0)
+    npy = (npy - 0.5) * 2
+    npy = np.transpose(npy, (2, 0, 1))
+    npy = npy.astype(np.float32)
+    for i in range(npy.shape[0]):
+        tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/Fly0B/cycout/yzft0/' + str(i).zfill(3) + '.tif', npy[i, ::])
+    #tif_to_patches(npy,
+    #     destination='zyori8/',
+    #     dh=(32, 512, 512), step=(32, 512, 512), permute=(1, 0, 2), trd=2000, norm='11', prefix='', ftr=-1)
+
+if 0:
+    root = '/media/ExtHDD01/BRC/JY_20240605/'
+    xlist = sorted(glob.glob(root + 'ExMa2_ROI1_10um/*.tif'))
+
+    for i in range(0, len(xlist), 32):
+        print(i)
+        npy = read_2d_tif_to_3d(xlist[i:i+32])
+        npy[npy > 5400] = 5400
+        npy = (npy - 0) / (5400 - 0)
+        npy = (npy - 0.5) * 2
+        tif_to_patches(npy,
+                       destination='temp/',
+                       dh=(32, 512, 512), step=(32, 512, 512), permute=None,
+                       trd=[5400], norm=None, prefix=str(i).zfill(3), ftr=-1, read_2d=True)
 
 #xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()
