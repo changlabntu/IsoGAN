@@ -88,6 +88,7 @@ class PairedSlices(data.Dataset):
         self.filenames = filenames
         self.index = index
         self.all_path = list(os.path.join(root, x) for x in path.split('_'))
+        print("all_path:")
         print(self.all_path)
 
         # get name of images if exist in the all the paired folders
