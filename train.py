@@ -78,13 +78,15 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, help='initial learning rate f -or adam')
     parser.add_argument('--beta1', type=float, help='beta1 for adam. default=0.5')
     parser.add_argument('--threads', type=int, help='number of threads for data loader to use')
-    parser.add_argument('--epoch_count', type=int, help='the starting epoch count')
-    parser.add_argument('--epoch_load', type=int, help='to load checkpoint form the epoch count')
+    #parser.add_argument('--epoch_count', type=int, help='the starting epoch count')
+    #parser.add_argument('--epoch_load', type=int, help='to load checkpoint form the epoch count')
+    parser.add_argument('--epoch_save', type=int, default=20, help='to save checkpoint every epoch')
     parser.add_argument('--n_epochs_decay', type=int, help='# of iter to linearly decay learning rate to zero')
     parser.add_argument('--lr_policy', type=str, help='learning rate policy: lambda|step|plateau|cosine')
     parser.add_argument('--lr_decay_iters', type=int, help='multiply by a gamma every lr_decay_iters iterations')
     parser.add_argument('--save_d', action='store_true', dest='save_d', default=False,
                         help='save checkpoints of discriminators')
+
     # Loss
     parser.add_argument('--lamb', type=int, help='weight on L1 term in objective')
     # Misc

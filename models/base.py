@@ -219,7 +219,7 @@ class BaseModel(pl.LightningModule):
             pass
 
         # checkpoint
-        if self.epoch % 20 == 0:
+        if self.epoch % self.hparams.epoch_save == 0:
             for name in self.netg_names.keys():
                 path_g = self.dir_checkpoints + ('/' + self.netg_names[name] + '_model_epoch_{}.pth').format(self.epoch)
                 torch.save(getattr(self, name), path_g)

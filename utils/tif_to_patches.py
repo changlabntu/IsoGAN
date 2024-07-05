@@ -189,13 +189,13 @@ if 0:
                        trd=[5400], norm=None, prefix=str(i).zfill(3), ftr=-1, read_2d=True)
 
 if 1:
-    root = '/media/ExtHDD01/Dataset/paired_images/Weikun060524/'
+    root = '/media/ExtHDD01/Dataset/paired_images/weikun060524/'
     suffix = ''
     for s in ['roiAx2', 'roiBx2']:
         npy = tiff.imread(root + s + '.tif')
         tif_to_patches(npy,
                        destination='temp/',
                        dh=(32, 512, 512), step=(32, 512, 512), permute=None,
-                       trd=(0, 5100), norm='11', prefix=s, ftr=-1, read_2d=False)
+                       trd=(0, 5100), norm='11', prefix=s, ftr=-1000, read_2d=False)
 
 #xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()
