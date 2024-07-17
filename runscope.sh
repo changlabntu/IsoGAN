@@ -14,3 +14,10 @@
 
 # Fly0B
 #python train.py --jsn cyc_imorphics --prj IsoScopeXY/ngf32lb10skip4 --models IsoScopeXY --cropz 20 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction xyori --nm 00 --netG ed023d --dataset Fly0B --n_epochs 6000 --lr_policy cosine --mc --lamb 10 --skipl1 4
+
+# weikun
+# train.py --jsn cyc_imorphics --prj IsoScopeXY16X/ngf32lb10skip2nocyc --models IsoScopeXY --cropz 8 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction xyorix2 --nm 00 --netG ed023d --dataset weikun060524 --n_epochs 10000 --lr_policy cosine --mc --lamb 10 --skipl1 2 --nocyc
+# train.py --jsn cyc_imorphics --prj IsoScopeXY16X/ngf32ndf32lb10skip2 --models IsoScopeXY --cropz 8 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction xyorix2 --nm 00 --netG ed023d --dataset weikun060524 --n_epochs 10000 --lr_policy cosine --mc --lamb 10 --skipl1 2 --ndf 32 --epoch_save 100
+
+# weikun > DPM4X
+python train.py --jsn cyc_imorphics --prj IsoScopeXY/ngf32ndf32lb10skip4 --models IsoScopeXY --cropz 19 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction xyori512 --nm 00 --netG ed023d --dataset DPM4X --n_epochs 10000 --lr_policy cosine --mc --lamb 10 --skipl1 4 --ndf 32 --epoch_save 100

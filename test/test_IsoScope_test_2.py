@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 
 def get_one_out(x0, model):
+    #model, upsample = get_model(kwargs, gpu)
     x0 = x0.unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
 
     if gpu:
@@ -74,23 +75,20 @@ def get_args(option):
         kwargs = {
             "dataset": 'Dayu1',
             "trd": 424,
-            #"prj": '/IsoScopeXY/ngf32ndf32lb10skip4/',
-            #"epoch": 1700,
-            "prj": '/IsoScopeXYftr0/ngf32ndf32lb10skip4exp0/',
-            "epoch": 2100,
-            "uprate": 6,
+            #"prj": '/IsoScopeXXcyc0lb/ngf32lb10notrd/',
+            #"prj": '/IsoScopeXXcyc0b/ngf32lb10cut0/',
+            #"epoch": 1100,
+            "prj": '/IsoScopeXY/ngf32ndf32lb10skip4run0/',
+            "epoch": 2400,
+            "uprate": 8,
             #"upsample_params": {'size': (384+32, 128, 384+32)},
             #"patch_range": {'start_dim0': -((384+32) * 300 // 1890), 'end_dim0': None,
             #                'start_dim1': -128, 'end_dim1': None,
             #               'start_dim2': 0, 'end_dim2': (384+32)}
             "upsample_params": {'size': (256, 256, 256)},
-            "patch_range": {'start_dim0': 56*3, 'end_dim0': 56*3+40,
-                            'start_dim1': 230, 'end_dim1': 230+256,
-                            'start_dim2': 384, 'end_dim2': 384+256}
-            # "upsample_params": {'size': (256, 256, 256)},
-            # "patch_range": {'start_dim0': 80, 'end_dim0': 120,
-            #                'start_dim1': 512, 'end_dim1': 512 + 256,
-            #                'start_dim2': 512, 'end_dim2': 512 + 256}
+            "patch_range": {'start_dim0': 80, 'end_dim0': 120,
+                            'start_dim1': 512, 'end_dim1': 512 + 256,
+                            'start_dim2': 512, 'end_dim2': 512 + 256}
         }
         x0 = tiff.imread('/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"] + '/xyori.tif')
     elif option == 'Fly0B':
@@ -127,25 +125,21 @@ def get_args(option):
         kwargs = {
         "dataset": 'womac4',
         "trd": 800,
-        "prj": '/IsoScopeXX/cyc0lb1skip4ndf32/',
-        "epoch": 320,
-        #"prj": '/IsoScopeXX/redo/',
-        #"epoch": 800,
-        #"prj": '/IsoScopeXXoai/cycNot/',
-        #"epoch": 160,
+        #"prj": '/IsoScopeXX/cyc0lb1skip4ndf32/',
+        #"epoch": 100,
+        "prj": '/IsoScopeXYnocyc/redolamb10/',
+        "epoch": 200,
         "uprate": 8,
         "upsample_params": {'size': (23*8, 384, 384)},
         "patch_range": {'start_dim0': None, 'end_dim0': None, 'start_dim1': None, 'end_dim1': None, 'start_dim2': None, 'end_dim2': None},
         }
-        womac4_list = ['9081362_06.tif']
         x_list = sorted(glob.glob('/media/ExtHDD01/oai_diffusion_interpolated/original/a2d/*.tif'))
-        x0 = tiff.imread(x_list[14])
+        x0 = tiff.imread(x_list[0])
     elif option == 'weikun060524':
         kwargs = {
             "dataset": 'weikun060524',
             "trd": 5000,
-            #"prj": '/IsoScopeXY16X/ngf32ndf32lb10skip2',
-            "prj": '/IsoScopeXY16X/ngf32ndf32lb10skip2nocyc',
+            "prj": '/IsoScopeXY16X/ngf32ndf32lb10skip2',
             "epoch": 3000,#2300,
             "uprate": 8,
             "upsample_params": {'size': (384, 128, 384)},
@@ -165,11 +159,11 @@ def assemble_microscopy_volumne(kwargs, zrange, xrange, yrange, source):
             for iy in yrange:
                 #print(iz, ix, iy)
                 x = tiff.imread(source + str(iz) + '_' + str(ix) + '_' + str(iy) + '.tif')
-                cropped = x[64:-64, :, 64:-64]
+                cropped = x[C[0]:-C[0], :, C[2]:-C[2]]
                 cropped = np.multiply(cropped, w)
                 if len(one_row) > 0:
-                    one_row[-1][:, :, -64:] = one_row[-1][:, :, -64:] + cropped[:, :, :64]
-                    one_row.append(cropped[:, :, 64:])
+                    one_row[-1][:, :, -C[2]:] = one_row[-1][:, :, -C[2]:] + cropped[:, :, :C[2]]
+                    one_row.append(cropped[:, :, C[2]:])
                 else:
                     one_row.append(cropped)
             one_row = np.concatenate(one_row, axis=2)
@@ -177,8 +171,8 @@ def assemble_microscopy_volumne(kwargs, zrange, xrange, yrange, source):
             print(one_row.shape)
 
             if len(one_column) > 0:
-                one_column[-1][:, -64:, :] = one_column[-1][:, -64:, :] + one_row[:, :64, :]
-                one_column.append(one_row[:, 64:, :])
+                one_column[-1][:, -C[0]:, :] = one_column[-1][:, -C[0]:, :] + one_row[:, :C[0], :]
+                one_column.append(one_row[:, C[0]:, :])
             else:
                 one_column.append(one_row)
         one_column = np.concatenate(one_column, axis=1).astype(np.float32)
@@ -258,127 +252,81 @@ def slice_for_ganout():
                 tiff.imwrite(roi.replace('/xy/', '/ganori/')[:-4] + '_' + str(ix).zfill(3) + '.tif', ori[:, ix, :])
 
 
-def get_weight(size, method='cross'):
-    #weight = np.ones(kwargs["upsample_params"]['size'])
-    weight = np.ones(size)
-    weight[:, :, :H] = np.linspace(0, 1, H)
-    weight[:, :, -H:] = np.linspace(1, 0, H)
-    if method == 'row':
-        return weight
-    if method == 'cross':
-        weight = np.multiply(np.transpose(weight, (2, 1, 0)), weight)
-        return weight
+x0, kwargs = get_args(option='Dayu1')
+x0 = norm_x0(x0, kwargs)
 
-
-option = 'womac4'
-expand = False
-gpu = False
-norm_exp = False
-tilt = False
+gpu = True
 mc = 1
-x0, kwargs = get_args(option=option)
-destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"]
-
-if norm_exp:
-    x0[x0 <= 100] = 100
-    x0[x0 >= 424] = 424
-    xx=np.log10(x0+1);xx=np.divide((xx-xx.mean()), xx.std());
-    trd = 6
-    xx[xx<=-trd]=-trd;xx[xx>=trd]=trd;xx=xx/trd
-    x0 = xx
-    x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
-else:
-    x0 = norm_x0(x0, kwargs)
-
-# repeat
-if expand:
-    x0 = torch.cat([(torch.flip(x0, (2,))[:, :, -8:, :, :]), x0, torch.flip(x0, (2,))[:, :, :8, :, :]], 2)
-    # expand dim 1
-    x0 = torch.cat([(torch.flip(x0, (3,))[:, :, :, -64:, :]), x0, torch.flip(x0, (3,))[:, :, :, :64, :]], 3)
-    kwargs['upsample_params']['size'] = ((23+16)*8, 512, 384)
-
-
-if tilt:
-    if 0:
-        import torchvision.transforms as transforms
-        x0 = x0.squeeze().unsqueeze(1)
-        to_tilt = transforms.RandomRotation((20, 21), interpolation=transforms.functional.InterpolationMode.BILINEAR,
-                                                expand=False, center=None, fill=-1)
-        back_tilt = transforms.RandomRotation((-20, -19), interpolation=transforms.functional.InterpolationMode.BILINEAR,
-                                                expand=False, center=None, fill=-1)
-        x0 = to_tilt(x0)
-        x0 = x0.squeeze().unsqueeze(0).unsqueeze(1)
-    x0 = torch.flip(x0, (2,))
-
 
 # single test
 model, upsample = get_model(kwargs, gpu)
 out, patch = test_IsoScope(x0, model, **kwargs)
-out = out.mean(axis=3)
-
-if expand:
-    out = out[8*8:-8*8, 64:-64, :, :]
-    patch = patch[8*8:-8*8, 64:-64, :]
-
-if tilt:
-    #out = back_tilt(torch.from_numpy(out).unsqueeze(1)).squeeze().numpy()
-    #patch = back_tilt(torch.from_numpy(patch).unsqueeze(1)).squeeze().numpy()
-    out = out[::-1, :, :]
-
-if option == 'womac4':
-    tiff.imwrite(destination + '/patch.tif', view_two_other_direction(patch))
-    tiff.imwrite(destination + '/xy.tif', view_two_other_direction(out))
-else:
-    tiff.imwrite(destination + '/patch.tif', np.transpose(patch, (1, 0, 2)))
-    tiff.imwrite(destination + '/xy.tif', np.transpose(out.mean(axis=3), (1, 0, 2)))
+tiff.imwrite('patch.tif', np.transpose(patch, (1, 0, 2)))
+tiff.imwrite('xy.tif', np.transpose(out.mean(axis=3), (1, 0, 2)))
+#tiff.imwrite('patch.tif', view_two_other_direction(patch))
+#tiff.imwrite('xy.tif', view_two_other_direction(out.mean(axis=3)))
 
 # Fly0B
 if 0:
-    recreate_volume_folder(destination + '/cycout/')
+    destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"] + '/cycout/'
+    recreate_volume_folder(destination)
     H = 64
     dz, dx, dy = (6 * H // kwargs['uprate'], 2 * H, 6 * H)
     sz, sx, sy = (3 * H // kwargs['uprate'], 1 * H, 3 * H)
-    zrange = range(0, x0.shape[2], sz)[-7:-2]
+    zrange = range(0, x0.shape[2], sz)[:-2]
     xrange = [448]#range(0, x0.shape[3], sx)[:-2]
     yrange = range(0, x0.shape[4], sy)[:-2]
 
-    test_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination + '/cycout/')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=[448], yrange=yrange, source=destination + '/cycout/xy/')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + '/cycout/ori/')
+    test_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination)
+    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=[448], yrange=yrange, source=destination + 'xy/')
+    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + 'ori/')
 
 
 # weikun060524
-if 0:
-    recreate_volume_folder(destination + '/cycout/')
-    H = 64
-    dz, dx, dy = (6 * H // 16, 2 * H, 6 * H)
-    sz, sx, sy = (3 * H // 16, 1 * H, 3 * H)
+#H = 64
+#dz, dx, dy = (6 * H // 16, 2 * H, 6 * H)
+#sz, sx, sy = (3 * H // 16, 1 * H, 3 * H)
+#test_microscopy_volumne(kwargs, zrange=range(0, x0.shape[2], sz)[:],
+#                        xrange=[1536], yrange=range(0, x0.shape[4], sy)[:], destination=destination)
 
-    zrange = range(0, x0.shape[2], sz)[:-2]
-    xrange = [1536]
-    yrange = range(0, x0.shape[4], sy)[:]
+def get_weight(method, size=(256, 128, 256)):
+    weight = np.ones(size)
+    weight[:, :, :C[2]] = np.linspace(0, 1, C[2])
+    weight[:, :, -C[2]:] = np.linspace(1, 0, C[2])
 
-    test_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination + '/cycout/')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=[1536], yrange=yrange, source=destination + '/cycout/xy/')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + '/cycout/ori/')
+    weight1 = np.ones(size)
+    weight1[:, :, :C[0]] = np.linspace(0, 1, C[0])
+    weight1[:, :, -C[0]:] = np.linspace(1, 0, C[0])
+
+    if method == 'row':
+        return weight
+    if method == 'cross':
+        weight = np.multiply(np.transpose(weight, (2, 1, 0)), weight1)
+        return weight
 
 
-# Dayu1
-# "upsample_params": {'size': (256, 256, 256)},
-if 0: # processing volume
-    recreate_volume_folder(destination + '/cycout/')
-    H = 64
-    #dz, dx, dy = (6 * H // kwargs['uprate'], 2 * H, 6 * H)
-    #sz, sx, sy = (3 * H // kwargs['uprate'], 1 * H, 3 * H)
-    dz, dx, dy = (60, 256, 256)
-    sz, sx, sy = (30, 128, 128)
-    zrange = range(0, x0.shape[2], sz)[4:12]
-    xrange = [448]#range(0, x0.shape[3], sx)[:-2]
-    yrange = range(0, x0.shape[4], sy)[:-2]
+if 1: # processing volume
+    #"patch_range": {'start_dim0': 160, 'end_dim0': 176 + 16,
+    #                'start_dim1': 230, 'end_dim1': 230 + 256,
+    #                'start_dim2': 384, 'end_dim2': 384 + 256}
 
-    test_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination + '/cycout/')
-    w = get_weight((128, 256, 128), method='cross')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=[448], yrange=yrange, source=destination + '/cycout/xy/')
-    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=[448], yrange=yrange, source=destination + '/cycout/ori/')
+    # Dayu1
+    destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"] + '/cycout/'
+    recreate_volume_folder(destination)
+    C = (64, 0, 64)
+    dz, dx, dy = (40, 256, 256)
+    sz, sx, sy = (15, 96, 96)  # / 8 * 3
+    #zrange = range(0, x0.shape[2], sz)[3:9]  #[80, 100, 120]
+    #xrange = range(0, x0.shape[3], sx)[4:5]  #[768]
+    #yrange = range(0, x0.shape[4], sy)[3:9]  #[128, 256, 384, 512, 640, 768]
+    zrange = range(80, 160+sz, sz)  #[80, 100, 120]
+    xrange = [768]
+    yrange = range(128, 1024-128, sy)  #[128, 256, 384, 512, 640, 768]
+
+    test_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination)
+
+    w = get_weight('cross', size=(128, 256, 128))
+    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + 'xy/')
+    assemble_microscopy_volumne(kwargs, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + 'ori/')
 
 

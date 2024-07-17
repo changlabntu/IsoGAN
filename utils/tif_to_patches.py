@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 
 def read_2d_tif_to_3d(xlist):
@@ -16,7 +17,7 @@ def read_2d_tif_to_3d(xlist):
     return x
 
 
-def tif_to_patches(npy, **kwargs):
+def tif_to_patches(npys, **kwargs):
     """
     Convert a tif file to a folder of patches
     """
@@ -25,16 +26,21 @@ def tif_to_patches(npy, **kwargs):
 
     os.makedirs(root + kwargs['destination'], exist_ok=True)
 
+    npy = npys[0]
+
     if kwargs['trd'] is not None:
         npy[npy < kwargs['trd'][0]] = kwargs['trd'][0]
         npy[npy > kwargs['trd'][1]] = kwargs['trd'][1]
 
-    if kwargs['norm'] is not None:
-        if kwargs['norm'] == '01':
-            npy = (npy - npy.min()) / (npy.max() - npy.min())
-        elif kwargs['norm'] == '11':
-            npy = (npy - npy.min()) / (npy.max() - npy.min())
-            npy = (npy - 0.5) * 2
+    if kwargs['zrescale'] is not None:
+        npy = z_rescale(npy, trd=kwargs['zrescale'])
+    else:
+        if kwargs['norm'] is not None:
+            if kwargs['norm'] == '01':
+                npy = (npy - npy.min()) / (npy.max() - npy.min())
+            elif kwargs['norm'] == '11':
+                npy = (npy - npy.min()) / (npy.max() - npy.min())
+                npy = (npy - 0.5) * 2
 
     for z in range(npy.shape[0] // sz):
         for x in range(npy.shape[1] // sx):
@@ -46,13 +52,12 @@ def tif_to_patches(npy, **kwargs):
                             volume = np.transpose(volume, kwargs['permute'])
                         for s in range(volume.shape[0]):
                             patch = volume[s, ::]
-                            if patch.mean() > kwargs['ftr']:
-                                #print(patch.mean())
+                            if volume.mean() > kwargs['ftr']:
                                 if kwargs['norm'] is not None:
                                     patch = patch.astype(np.float32)
-                                tiff.imwrite(root + kwargs['destination'] + kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
-                                            '_' + str(s).zfill(4) + '.tif', patch)
-                                #tiff.imwrite(root + kwargs['destination'] + str(patch.mean()) + '.tif', patch)
+                                #tiff.imwrite(root + kwargs['destination'] + kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
+                                            #'_' + str(s).zfill(4) + '.tif', patch)
+                                tiff.imwrite(root + kwargs['destination'] + str(volume.mean())[:7] + '_' + str(s).zfill(4) + '.tif', patch)
 
 
 #def main(source, destination, dh, step, permute, trds, norm, prefix, ftr):
@@ -80,6 +85,12 @@ def resampling(source, destination, scale=None, size=None):
     x = x.astype(np.float32)
     out = up(torch.from_numpy(x).unsqueeze(0).unsqueeze(0))
     tiff.imwrite(destination, out[0, 0, :, :, :].numpy().astype(dtype))
+
+
+def z_rescale(xx, trd=6):
+    xx=np.log10(xx+1);xx=np.divide((xx-xx.mean()), xx.std());
+    xx[xx<=-trd]=-trd;xx[xx>=trd]=trd;xx=xx/trd;
+    return xx
 
 
 def get_average(source, destination):
@@ -140,13 +151,25 @@ if 0:
          destination=['xyori' + suffix],
          dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11')
 
-if 0:
-    root = '/workspace/Data/DPM4X/'
+if 1:
+    #root = '/workspace/Data/DPM4X/'
+    #suffix = ''
+    #for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
+    #    main(source=[s + suffix],
+    #         destination=['xyori512' + suffix],
+    #         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
+
+    #root = '/workspace/Data/DPM4X/'
+    root = '/media/ExtHDD01/Dataset/paired_images/DPM4X/'
     suffix = ''
-    for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
-        main(source=[s + suffix],
-             destination=['xyori512' + suffix],
-             dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
+    for s in ['ori/3-2ROI00' + str(x) for x in range(10)]:##, '3-2ROI002', '3-2ROI006', '3-2ROI008']:
+        npy0 = tiff.imread(root + s + '.tif')
+        #npy1 = tiff.imread((root + s + '.tif').replace('/ori/', '/pseudo/'))
+        tif_to_patches([npy0],
+                       destination='temp/',
+                       dh=(32, 256, 256), step=(32, 256, 256), permute=None,
+                       trd=(100, 424), norm='11',  prefix=s.split('.')[0] + '-', ftr=0, zrescale=6)
+
 
 if 0:
     #root = '/workspace/Data/Fly0B/'
@@ -188,7 +211,7 @@ if 0:
                        dh=(32, 512, 512), step=(32, 512, 512), permute=None,
                        trd=[5400], norm=None, prefix=str(i).zfill(3), ftr=-1, read_2d=True)
 
-if 1:
+if 0:
     root = '/media/ExtHDD01/Dataset/paired_images/weikun060524/'
     suffix = ''
     for s in ['roiAx2', 'roiBx2']:
@@ -198,4 +221,28 @@ if 1:
                        dh=(32, 512, 512), step=(32, 512, 512), permute=None,
                        trd=(0, 5100), norm='11', prefix=s, ftr=-1000, read_2d=False)
 
-#xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());xx[xx<=-5]=-5;xx[xx>=5]=5;xx=xx/5;plt.hist(xx.flatten(), bins=50);plt.show()
+if 0:
+    root = '/media/ExtHDD01/Dataset/paired_images/DPM4X/'
+    x = tiff.imread(root + 'ori/3-2ROI008.tif')
+    x[x<=100] = 100
+    x[x>=424] = 424
+    xx=np.log10(x+1);xx=np.divide((xx-xx.mean()), xx.std());
+    trd = 6
+    xx[xx<=-trd]=-trd;xx[xx>=trd]=trd;xx=xx/trd;
+    plt.hist(xx.flatten(), bins=50);plt.show()
+    tiff.imwrite(root + 'temp.tif', xx)
+
+if 0:
+    root = '/media/ExtHDD01/Dataset/paired_images/womac4/full/ap/'
+    x_list = sorted(glob.glob(root + '*.tif'))
+    for x in x_list:
+        y = tiff.imread(x)
+        y = np.log10(y + 1); y = np.divide((y - y.mean()), y.std())
+        trd = 3
+        y[y <= -trd] = -trd;
+        y[y >= trd] = trd;
+        y = y / trd;
+        #plt.hist(y.flatten(), bins=50)
+        #plt.show()
+        print(x.replace('/ap/', '/apexp/'))
+        tiff.imwrite(x.replace('/ap/', '/apexp/'), y)
