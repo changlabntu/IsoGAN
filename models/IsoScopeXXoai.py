@@ -5,7 +5,7 @@ import numpy as np
 import torch.nn as nn
 from models.base import VGGLoss
 from networks.networks_cut import Normalize, init_net, PatchNCELoss
-
+import torchvision.transforms as transforms
 
 class PatchSampleF3D(nn.Module):
     def __init__(self, use_mlp=False, init_type='normal', init_gain=0.02, nc=256, gpu_ids=[]):
@@ -134,7 +134,9 @@ class GAN(BaseModel):
         parser.add_argument("--c_mlp", dest='c_mlp', type=int, default=256, help='channel of mlp')
         parser.add_argument('--fWhich', nargs='+', help='which layers to have NCE loss', type=int, default=None)
         #parser.add_argument('--l1scheme', type=str, default='Xup', help='what to use for L1, Xup or oriX')
-        parser.add_argument('--cycscheme', type=str, default='Xup', help='what to use for cyc adv, Xup or oriX')
+        parser.add_argument('--cycscheme', type=str, default='oriX', help='what to use for cyc adv, Xup or oriX')
+        parser.add_argument('--rotateadv', action='store_true')
+        parser.add_argument('--flipadv', action='store_true')
         return parent_parser
 
     def test_method(self, net_g, img):
@@ -160,39 +162,54 @@ class GAN(BaseModel):
         if not self.hparams.nocyc:
             self.XupXback = self.net_gback(self.XupX)['out0']
 
+        self.rotate = transforms.RandomRotation((-30, 30),
+                                                interpolation=transforms.functional.InterpolationMode.BILINEAR,
+                                                expand=False, center=None, fill=0)
+
+    def ra(self, x):
+        if self.hparams.rotateadv:
+            return self.rotate(x)
+        elif self.hparams.flipadv:
+            if np.random.rand() > 0.5:
+                return torch.flip(x, (2,))
+            else:
+                return x
+        else:
+            return x
+
     def get_xy_plane(self, x):  # (B, C, X, Y, Z)
         return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]  # (Z, C, X, Y, B)
 
     def adv_loss_six_way(self, x, net_d, truth):
         loss = 0
-        loss += self.add_loss_adv(a=x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
+        loss += self.add_loss_adv(a=self.ra(x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0]),  # (X, C, Z, Y)
                                        net_d=net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Y, Z)
+        loss += self.add_loss_adv(a=self.ra(x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0]),  # (X, C, Y, Z)
                                        net_d=net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0],  # (Y, C, Z, X)
+        loss += self.add_loss_adv(a=self.ra(x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0]),  # (Y, C, Z, X)
                                        net_d=net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(3, 1, 2, 4, 0)[:, :, :, :, 0],  # (Y, C, X, Z)
+        loss += self.add_loss_adv(a=self.ra(x.permute(3, 1, 2, 4, 0)[:, :, :, :, 0]),  # (Y, C, X, Z)
                                        net_d=net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(4, 1, 2, 3, 0)[:, :, :, :, 0],  # (Z, C, X, Y)
+        loss += self.add_loss_adv(a=self.ra(x.permute(4, 1, 2, 3, 0)[:, :, :, :, 0]),  # (Z, C, X, Y)
                                        net_d=net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(4, 1, 3, 2, 0)[:, :, :, :, 0],  # (Z, C, Y, X)
+        loss += self.add_loss_adv(a=self.ra(x.permute(4, 1, 3, 2, 0)[:, :, :, :, 0]),  # (Z, C, Y, X)
                                        net_d=net_d, truth=truth)
         loss = loss / 6
         return loss
 
     def adv_loss_six_way_y(self, x, truth):
         loss = 0
-        loss += self.add_loss_adv(a=x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
+        loss += self.add_loss_adv(a=self.ra(x.permute(2, 1, 4, 3, 0)[:, :, :, :, 0]),  # (X, C, Z, Y)
                                         net_d=self.net_dzy, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0],  # (X, C, Z, Y)
+        loss += self.add_loss_adv(a=self.ra(x.permute(2, 1, 3, 4, 0)[:, :, :, :, 0]),  # (X, C, Z, Y)
                                         net_d=self.net_dzy, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0],  # (Y, C, Z, X)
+        loss += self.add_loss_adv(a=self.ra(x.permute(3, 1, 4, 2, 0)[:, :, :, :, 0]),  # (Y, C, Z, X)
                                         net_d=self.net_dzx, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(3, 1, 2, 4, 0)[:, :, :, :, 0],  # (Y, C, X, Z)
+        loss += self.add_loss_adv(a=self.ra(x.permute(3, 1, 2, 4, 0)[:, :, :, :, 0]),  # (Y, C, X, Z)
                                         net_d=self.net_dzx, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(4, 1, 2, 3, 0)[:, :, :, :, 0],  # (Z, C, X, Y)
+        loss += self.add_loss_adv(a=self.ra(x.permute(4, 1, 2, 3, 0)[:, :, :, :, 0]),  # (Z, C, X, Y)
                                         net_d=self.net_d, truth=truth)
-        loss += self.add_loss_adv(a=x.permute(4, 1, 3, 2, 0)[:, :, :, :, 0],  # (Z, C, Y, X)
+        loss += self.add_loss_adv(a=self.ra(x.permute(4, 1, 3, 2, 0)[:, :, :, :, 0]),  # (Z, C, Y, X)
                                         net_d=self.net_d, truth=truth)
         loss = loss / 6
         return loss

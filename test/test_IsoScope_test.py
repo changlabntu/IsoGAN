@@ -127,12 +127,10 @@ def get_args(option):
         kwargs = {
         "dataset": 'womac4',
         "trd": 800,
-        "prj": '/IsoScopeXX/cyc0lb1skip4ndf32/',
-        "epoch": 320,
-        #"prj": '/IsoScopeXX/redo/',
-        #"epoch": 800,
-        #"prj": '/IsoScopeXXoai/cycNot/',
-        #"epoch": 160,
+        #"prj": '/IsoScopeXX/cyc0lb1skip4ndf32/',
+        #"epoch": 320,
+        "prj": '/IsoScopeXXoai/cycNot/',
+        "epoch": 220,
         "uprate": 8,
         "upsample_params": {'size': (23*8, 384, 384)},
         "patch_range": {'start_dim0': None, 'end_dim0': None, 'start_dim1': None, 'end_dim1': None, 'start_dim2': None, 'end_dim2': None},
@@ -211,7 +209,7 @@ def get_model(kwargs, gpu):
     model = torch.load(
         '/media/ExtHDD01/logs/' + dataset + prj + '/checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
         map_location=torch.device('cpu'))  # .cuda()#.eval()
-    upsample = torch.nn.Upsample(size=kwargs['upsample_params']['size'], mode='trilinear')
+    upsample = torch.nn.Upsample(size=kwargs['upsample_params']['size'])#, mode='trilinear')
     if gpu:
         model = model.cuda()
         upsample = upsample.cuda()
@@ -271,10 +269,10 @@ def get_weight(size, method='cross'):
 
 
 option = 'womac4'
-expand = False
+expand = True
 gpu = False
 norm_exp = False
-tilt = False
+tilt = True
 mc = 1
 x0, kwargs = get_args(option=option)
 destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"]
@@ -317,7 +315,7 @@ out, patch = test_IsoScope(x0, model, **kwargs)
 out = out.mean(axis=3)
 
 if expand:
-    out = out[8*8:-8*8, 64:-64, :, :]
+    out = out[8*8:-8*8, 64:-64, :]
     patch = patch[8*8:-8*8, 64:-64, :]
 
 if tilt:

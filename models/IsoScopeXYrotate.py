@@ -6,8 +6,6 @@ import torch.nn as nn
 from models.base import VGGLoss
 from networks.networks_cut import Normalize, init_net, PatchNCELoss
 import torchvision.transforms as transforms
-
-import torchvision.transforms as transforms
 if 0:
     x = torch.ones(12, 1, 256, 256)
     x[:, :, 32:-32, 32:-32] = 0
