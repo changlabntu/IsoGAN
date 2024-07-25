@@ -76,8 +76,8 @@ def get_args(option):
             "trd": 424,
             #"prj": '/IsoScopeXY/ngf32ndf32lb10skip4/',
             #"epoch": 1700,
-            "prj": '/IsoScopeXYftr0/ngf32ndf32lb10skip4exp0/',
-            "epoch": 2100,
+            "prj": '/IsoScopeXYftr0/ngf32ndf32lb10skip4exp0nocyc/',
+            "epoch": 1000,
             "uprate": 6,
             #"upsample_params": {'size': (384+32, 128, 384+32)},
             #"patch_range": {'start_dim0': -((384+32) * 300 // 1890), 'end_dim0': None,
@@ -127,17 +127,20 @@ def get_args(option):
         kwargs = {
         "dataset": 'womac4',
         "trd": 800,
-        #"prj": '/IsoScopeXX/cyc0lb1skip4ndf32/',
+        #"prj": '/IsoScopeXX/cyc0lb1skip4ndf32/', #baseline
         #"epoch": 320,
-        "prj": '/IsoScopeXXoai/cycNot/',
-        "epoch": 220,
+        #"prj": '/IsoScopeXX/cyc0lb1skip4ndf32nomc/',    #  no mc seems better
+        #"epoch": 500,
+        "prj": '/IsoScopeXXoai/bnormnomclr01/',
+        "epoch": 240,
         "uprate": 8,
         "upsample_params": {'size': (23*8, 384, 384)},
         "patch_range": {'start_dim0': None, 'end_dim0': None, 'start_dim1': None, 'end_dim1': None, 'start_dim2': None, 'end_dim2': None},
         }
-        womac4_list = ['9081362_06.tif']
-        x_list = sorted(glob.glob('/media/ExtHDD01/oai_diffusion_interpolated/original/a2d/*.tif'))
-        x0 = tiff.imread(x_list[14])
+        #womac4_list = ['9081362_06.tif']
+        #x_list = sorted(glob.glob('/media/ExtHDD01/oai_diffusion_interpolated/original/a2d/*.tif'));x0 = tiff.imread(x_list[14])
+        x_list = sorted(glob.glob('/media/ghc/GHc_data2/OAI_extracted/womac4min0/Processed/norm/*.tif'));x0 = tiff.imread(x_list[140])
+
     elif option == 'weikun060524':
         kwargs = {
             "dataset": 'weikun060524',
@@ -209,7 +212,7 @@ def get_model(kwargs, gpu):
     model = torch.load(
         '/media/ExtHDD01/logs/' + dataset + prj + '/checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
         map_location=torch.device('cpu'))  # .cuda()#.eval()
-    upsample = torch.nn.Upsample(size=kwargs['upsample_params']['size'])#, mode='trilinear')
+    upsample = torch.nn.Upsample(size=kwargs['upsample_params']['size'], mode='trilinear')
     if gpu:
         model = model.cuda()
         upsample = upsample.cuda()
@@ -269,10 +272,10 @@ def get_weight(size, method='cross'):
 
 
 option = 'womac4'
-expand = True
+expand = False
 gpu = False
 norm_exp = False
-tilt = True
+tilt = False
 mc = 1
 x0, kwargs = get_args(option=option)
 destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"]
@@ -285,8 +288,13 @@ if norm_exp:
     xx[xx<=-trd]=-trd;xx[xx>=trd]=trd;xx=xx/trd
     x0 = xx
     x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
-else:
+elif 0:
     x0 = norm_x0(x0, kwargs)
+
+x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
+
+#x0 = x0[:, :, :, :, :]
+#kwargs['upsample_params']['size'] = ((23)*8, 384, 384)
 
 # repeat
 if expand:
@@ -297,16 +305,16 @@ if expand:
 
 
 if tilt:
-    if 0:
+    if 1:
         import torchvision.transforms as transforms
         x0 = x0.squeeze().unsqueeze(1)
-        to_tilt = transforms.RandomRotation((20, 21), interpolation=transforms.functional.InterpolationMode.BILINEAR,
+        to_tilt = transforms.RandomRotation((-45, -44), interpolation=transforms.functional.InterpolationMode.BILINEAR,
                                                 expand=False, center=None, fill=-1)
-        back_tilt = transforms.RandomRotation((-20, -19), interpolation=transforms.functional.InterpolationMode.BILINEAR,
+        back_tilt = transforms.RandomRotation((45, 46), interpolation=transforms.functional.InterpolationMode.BILINEAR,
                                                 expand=False, center=None, fill=-1)
         x0 = to_tilt(x0)
         x0 = x0.squeeze().unsqueeze(0).unsqueeze(1)
-    x0 = torch.flip(x0, (2,))
+    #x0 = torch.flip(x0, (2,))
 
 
 # single test
@@ -319,16 +327,16 @@ if expand:
     patch = patch[8*8:-8*8, 64:-64, :]
 
 if tilt:
-    #out = back_tilt(torch.from_numpy(out).unsqueeze(1)).squeeze().numpy()
-    #patch = back_tilt(torch.from_numpy(patch).unsqueeze(1)).squeeze().numpy()
-    out = out[::-1, :, :]
+    out = back_tilt(torch.from_numpy(out).unsqueeze(1)).squeeze().numpy()
+    patch = back_tilt(torch.from_numpy(patch).unsqueeze(1)).squeeze().numpy()
+    #out = out[::-1, :, :]
 
 if option == 'womac4':
     tiff.imwrite(destination + '/patch.tif', view_two_other_direction(patch))
     tiff.imwrite(destination + '/xy.tif', view_two_other_direction(out))
 else:
     tiff.imwrite(destination + '/patch.tif', np.transpose(patch, (1, 0, 2)))
-    tiff.imwrite(destination + '/xy.tif', np.transpose(out.mean(axis=3), (1, 0, 2)))
+    tiff.imwrite(destination + '/xy.tif', np.transpose(out, (1, 0, 2)))
 
 # Fly0B
 if 0:
@@ -368,8 +376,8 @@ if 0: # processing volume
     H = 64
     #dz, dx, dy = (6 * H // kwargs['uprate'], 2 * H, 6 * H)
     #sz, sx, sy = (3 * H // kwargs['uprate'], 1 * H, 3 * H)
-    dz, dx, dy = (60, 256, 256)
-    sz, sx, sy = (30, 128, 128)
+    dz, dx, dy = (40, 256, 256)
+    sz, sx, sy = (20, 128, 128)
     zrange = range(0, x0.shape[2], sz)[4:12]
     xrange = [448]#range(0, x0.shape[3], sx)[:-2]
     yrange = range(0, x0.shape[4], sy)[:-2]

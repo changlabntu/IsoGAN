@@ -286,13 +286,15 @@ def remove_last_after_underline(s):
     return s[:s.rfind('_')]
 
 
-def IsoLesion_interpolate(source, destination, subjects, net, to_upsample=False, padding=False):
+def IsoLesion_interpolate(source, destination, subjects, net, to_upsample=False, padding=False, trd=None):
 
     for i in tqdm(range(len(subjects))):
 
         filename = subjects[i]
         x0 = tiff.imread(source + filename)
-
+        if trd is not None:
+            x0[x0 < trd[0]] = trd[0]
+            x0[x0 > trd[1]] = trd[1]
         x0 = x0 / x0.max()
 
         # crop Y axis
@@ -326,7 +328,7 @@ def IsoLesion_interpolate(source, destination, subjects, net, to_upsample=False,
             x0 = torch.cat((pad, pad0, x0, pad0, pad), 4)
 
         if to_upsample:
-            upsample = torch.nn.Upsample(size=(x0.shape[2], x0.shape[3], x0.shape[4] * 8),mode='nearest')
+            upsample = torch.nn.Upsample(size=(x0.shape[2], x0.shape[3], x0.shape[4] * 8), mode='nearest')
             x0 = upsample(x0)
 
         #out_all = test_once(x0, net)
@@ -396,13 +398,22 @@ def calculate_difference(x_list, y_list, destination, mask_list=None):
         #    x[z, :, :] = (x[z, :, :] - x[z, :, :].min()) / (x[z, :, :].max() - x[z, :, :].min())
         #    y[z, :, :] = (y[z, :, :] - y[z, :, :].min()) / (y[z, :, :].max() - y[z, :, :].min())
 
+        if mask_list is not None:
+            m = tiff.imread(mask_list[i])
+            m = torch.from_numpy(m).unsqueeze(0).unsqueeze(0).float()
+            m = torch.nn.functional.interpolate(m, scale_factor=(8, 1, 1), mode='trilinear', align_corners=False)
+            m = m.squeeze().numpy()
+
         difference = x - y
         difference[difference < 0] = 0
         difference = difference / 1
-        #difference = (difference + 1) / 2
-        #difference = (difference - difference.min()) / (difference.max() - difference.min())
+
+        if mask_list is not None:
+            m = (m > 60) / 1
+            difference = np.multiply(difference, m)
+
         difference = (difference * 255).astype(np.uint8)
-        tiff.imwrite(root + destination + x_list[i].split('/')[-1], difference)
+        tiff.imwrite(root + prj_name + destination + x_list[i].split('/')[-1], difference)
 
 
 def save_a_to_2d(source, subjects, destination):
@@ -431,17 +442,19 @@ def norm_11(x):
 def expand_3d_to_2d_for_visualize(destination, suffix, png=False, upsample=None):
     #destination = root + 'expanded3d/'
     #suffix = 'difference2d/'
-    source = root + suffix
+    source = root + prj_name + suffix
     #os.makedirs(destination + 'xy' + suffix, exist_ok=True)
     os.makedirs(destination + 'zy' + suffix, exist_ok=True)
     os.makedirs(destination + 'zx' + suffix, exist_ok=True)
     os.makedirs(destination + 'xy' + suffix, exist_ok=True)
 
     l = sorted(glob.glob(source + '*'))
+    print(len(l))
     for i in tqdm(range(len(l))):
         x0 = tiff.imread(l[i])  # (Z, X, Y)
         if upsample is not None:
-            x0 = norm_11(x0)  # ?????
+            if nm11:
+                x0 = norm_11(x0)  # ?????
             x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
             x0 = torch.nn.functional.interpolate(x0, scale_factor=(upsample, 1, 1), mode='trilinear', align_corners=False)
             x0 = x0.squeeze().numpy()
@@ -479,82 +492,97 @@ if __name__ == "__main__":
         prj = '/IsoLesion/DshareZngf48mc/'
         epoch = 200
         to_upsample = False
-    elif 0:
+    elif 0: # original
         prj = '/IsoScopeXX/cyc0lb1skip4ndf32/'
         epoch = 320
         #prj = '/IsoScopeXX/cyc0lb1skip4ndf32randl1/'
         #epoch = 300
         to_upsample = True
-    else:
-        prj = '/IsoScopeXX/cyc0lb1skip4ndf32nomc/'
-        epoch = 700
+    elif 1: # redo
+        prj = '/IsoScopeXXoai/redo/'
+        epoch = 500
         to_upsample = True
+    elif 0: # better?
+        prj = '/IsoScopeXX/cyc0lb1skip4ndf32nomc/'
+        epoch = 300
+        to_upsample = True
+    elif 0:
+        prj = "/IsoScopeXXoai/f16/"
+        epoch = 600
+        to_upsample = True
+
+
+    # output root
+    dppm_source = '/media/ExtHDD01/oai_diffusion_interpolated/original/diff0506/'
+    root = '/media/ExtHDD01/oai_diffusion_interpolated/'
+    ### OPTIONS ###
+    nm11 = True
+    source = '/media/ExtHDD01/oai_diffusion_interpolated/original/' + 'compare/test/'
+    #source = root + 'original/anorm2d/'
+    ### OPTIONS ###
 
     net = torch.load('/media/ExtHDD01/logs/womac4' + prj + 'checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
                        map_location=torch.device('cpu'))#.eval() # newly ran
 
-    # output root
-    dppm_source = '/media/ExtHDD01/oai_diffusion_interpolated/diff0504/'
-    root = '/media/ExtHDD01/oai_diffusion_interpolated/new/'
+    prj_name = 'test/'
+    os.makedirs(root + prj_name, exist_ok=True)
+
     ########################
     # Copy ddpm to 2d output
     ########################
     if 0:
-        destination = root + 'addpm2d/'
-        os.makedirs(destination, exist_ok=True)
+        destination = root + 'original/addpm2d0506/'
         save_a_to_2d(source=dppm_source, subjects=get_subjects_from_list_of_2d_tifs(dppm_source), destination=destination)
 
     #####################
     # Copy a to 2d output
     #####################
     if 0:
-        source = '/media/ExtHDD01/Dataset/paired_images/womac4/full/a/'
-        destination = root + 'a2d/'
+        raw_source = '/media/ExtHDD01/Dataset/paired_images/womac4/full/a/'
+        #source = '/media/ghc/GHc_data2/OAI_extracted/womac4min0/Processed/anorm/'
+        destination = root + 'original/anorm2d/'
         os.makedirs(destination, exist_ok=True)
-        save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(source)[0:500:5], destination=destination)
+        save_a_to_2d(source=source, subjects=get_subjects_from_list_of_2d_tifs(raw_source)[0:500:5], destination=destination)
 
     if 1:
-        source = '/media/ExtHDD01/oai_diffusion_interpolated/original/' + 'a2d/'
-        destination = root + 'a3d/'
+        destination = root + prj_name + 'a3d/'
         os.makedirs(destination, exist_ok=True)
-        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:10]
-        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample, padding=False)
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
+        subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
+        IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample, padding=False, trd=(0, 800))
+        expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='a3d/')
 
     if 0:
-        source = root + 'addpm2d/'
-        destination = root + 'addpm3d/'
+        source = root + 'original/addpm2d0506/'
+        destination = root + prj_name + 'addpm3d/'
         os.makedirs(destination, exist_ok=True)
         subjects = [x.split('/')[-1] for x in sorted(glob.glob(source + '*'))][:]
         IsoLesion_interpolate(source, destination, subjects, net, to_upsample=to_upsample)
-
 
     #####################
     # Calculate difference
     #####################
     if 0:
-        x_list = sorted(glob.glob(root + 'a2d/*'))
-        y_list = sorted(glob.glob(root + 'addpm2d/*'))
+        x_list = sorted(glob.glob(root + 'original/a2d/*'))
+        y_list = sorted(glob.glob(root + 'original/addpm2d0506/*'))
         destination = 'difference2d/'
-        os.makedirs(root + destination, exist_ok=True)
+        os.makedirs(root + prj_name + destination, exist_ok=True)
         calculate_difference(x_list, y_list, destination=destination)
     if 0:
-        x_list = sorted(glob.glob(root + 'a3d/*'))
-        y_list = sorted(glob.glob(root + 'addpm3d/*'))
-        mask_list  = sorted(glob.glob(root + 'difference2d/*'))
+        x_list = sorted(glob.glob(root + prj_name + 'a3d/*'))
+        y_list = sorted(glob.glob(root + prj_name + 'addpm3d/*'))
+        mask_list = sorted(glob.glob(root + prj_name + 'difference2d/*'))
         destination = 'difference3d/'
-        os.makedirs(root + destination, exist_ok=True)
-        calculate_difference(x_list, y_list, destination=destination)
+        os.makedirs(root + prj_name + destination, exist_ok=True)
+        calculate_difference(x_list, y_list, destination=destination, mask_list=mask_list)
 
     if 0:
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference2d/', upsample=8)
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='difference3d/')
-        expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a2d/', upsample=8)
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='a3d/')
+        #expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='difference2d/', upsample=8)
+        #expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='difference3d/')
+        expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='a2d/', upsample=8)
+        expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='a3d/')
 
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm2d/')
-        #expand_3d_to_2d_for_visualize(destination=root + 'expanded3d/', suffix='addpm3d/')
-
+        #expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='addpm2d/', upsample=8)
+        expand_3d_to_2d_for_visualize(destination=root + prj_name + 'expanded3d/', suffix='addpm3d/')
 
     if 0:
         #seg = torch.load('/home/ghc/Dropbox/TheSource/scripts/ContrastiveDiffusion/submodels/atten_0706.pth').eval()
