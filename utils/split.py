@@ -17,14 +17,14 @@ else:
 
 # indices
 if 0:
-    df = pd.read_csv('env/csv/womac4_moaks.csv')
+    df = pd.read_csv('../env/csv/womac4_moaks.csv')
     df = df.loc[df['V$$WOMKP#'] > 0, :]
     df.reset_index(inplace=True)
     train_index = list(df.loc[df['READPRJ'].isnull(), :].index)[:]
     test_index = list(df.loc[df['READPRJ'].notnull(), :].index)[:]
 
 # new indicies
-x = pd.read_csv('env/csv/womac4_moaks.csv')
+x = pd.read_csv('../env/csv/womac4_moaks.csv')
 labels = (x.loc[x['SIDE'] == 'RIGHT']['V$$WOMKP#']).values > (x.loc[x['SIDE'] == 'LEFT']['V$$WOMKP#']).values
 labels = [int(x) for x in labels]
 # labels = [(int(x),) for x in labels]

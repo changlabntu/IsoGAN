@@ -76,8 +76,10 @@ class GAN(BaseModel):
     def __init__(self, hparams, train_loader, eval_loader, checkpoints):
         BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
 
+        self.hparams.netG = 'ed023dE'
         self.hparams.final = 'tanh'
         self.net_g, self.net_d = self.set_networks()
+        self.hparams.netG = 'ed023dEback'
         self.hparams.final = 'tanh'
         self.net_gback, self.net_dzy = self.set_networks()
         self.net_dzx = copy.deepcopy(self.net_dzy)
@@ -91,10 +93,10 @@ class GAN(BaseModel):
         # Finally, initialize the optimizers and scheduler
         self.configure_optimizers()
 
-        if self.hparams.cropz > 0:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropz * hparams.uprate), mode='trilinear')
-        else:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, 32 * hparams.uprate), mode='trilinear')
+        #if self.hparams.cropz > 0:
+        #    self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropz * hparams.uprate), mode='trilinear')
+        #else:
+        #    self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, 32 * hparams.uprate), mode='trilinear')
 
         # CUT NCE
         if not self.hparams.nocut:
@@ -149,10 +151,11 @@ class GAN(BaseModel):
         self.oriX = batch['img'][0]  # (B, C, X, Y, Z) # original
         #self.oriY = batch['img'][1]  # (B, C, X, Y, Z) # original
 
-        self.Xup = self.upsample(self.oriX)  # (B, C, X, Y, Z)
+        #self.Xup = self.upsample(self.oriX)  # (B, C, X, Y, Z)
         #self.Yup = self.upsample(self.oriY)  # (B, C, X, Y, Z)
 
-        self.goutz = self.net_g(self.Xup, method='encode')
+        self.goutz = self.net_g(self.oriX, method='encode')
+        #print(self.goutz[-1].shape)
         self.XupX = self.net_g(self.goutz, method='decode')['out0']
 
         if not self.hparams.nocyc:
@@ -213,13 +216,15 @@ class GAN(BaseModel):
             loss_dict['gback'] = gback
             loss_g += gback
             if self.hparams.lamb > 0:
-                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+                #loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+                loss_g += self.add_loss_l1(a=self.XupXback[:, :, :, :, ::self.hparams.skipl1],
+                                           b=self.oriX[:, :, :, :, ::self.hparams.skipl1]) * self.hparams.lamb
 
         if not self.hparams.nocut:
             # (X, XupX)
+            #self.goutz = self.net_g(self.Xup, method='encode')
             feat_q = self.goutz
             feat_k = self.net_g(self.XupX, method='encode')
-            #feat_k = self.net_g(self.XupXback, method='encode')
 
             feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
                                                 None)  # get source patches by random id

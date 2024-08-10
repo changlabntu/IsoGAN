@@ -20,12 +20,15 @@ from networks.model_utils import get_activation
 
 sig = nn.Sigmoid()
 ACTIVATION = nn.ReLU
-#device = 'cuda'
+
+
+# device = 'cuda'
 
 
 class Flatten(torch.nn.Module):
     def forward(self, x):
         return x.reshape(x.size()[0], -1)
+
 
 def crop_and_concat(upsampled, bypass, crop=False):
     if crop:
@@ -105,8 +108,53 @@ def dense_layer_bn(in_dim, out_dim, momentum=0.01, activation=ACTIVATION):
     )
 
 
+class ResidualConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, activation=nn.ReLU(), batch_norm=True, dropout=0.0):
+        super(ResidualConvBlock, self).__init__()
+
+        conv2_block = conv2d_bn_block if batch_norm else conv2d_block
+
+        self.conv_block = nn.Sequential(
+            conv2_block(in_channels, out_channels, activation=activation),
+            nn.Dropout(p=dropout, inplace=False),
+            conv2_block(out_channels, out_channels, activation=activation),
+        )
+
+        # Residual connection
+        self.residual = nn.Conv2d(in_channels, out_channels,
+                                  kernel_size=1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        residual = self.residual(x)
+        out = self.conv_block(x)
+        return out + residual
+
+
+class ResidualConvBlock3D(nn.Module):
+    def __init__(self, in_channels, out_channels, activation=nn.ReLU(), batch_norm=True, dropout=0.0):
+        super(ResidualConvBlock3D, self).__init__()
+
+        conv3_block = conv3d_bn_block if batch_norm else conv3d_block
+
+        self.conv_block = nn.Sequential(
+            conv3_block(in_channels, out_channels, activation=activation),
+            nn.Dropout(p=dropout, inplace=False),
+            conv3_block(out_channels, out_channels, activation=activation),
+        )
+
+        # Residual connection
+        self.residual = nn.Conv3d(in_channels, out_channels,
+                                  kernel_size=1) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        residual = self.residual(x)
+        out = self.conv_block(x)
+        return out + residual
+
+
 class Generator(nn.Module):
-    def __init__(self, n_channels=1, out_channels=1, nf=32, norm_type='batch', activation=ACTIVATION, final='tanh', mc=False):
+    def __init__(self, n_channels=1, out_channels=1, nf=32, norm_type='batch', activation=ACTIVATION, final='tanh',
+                 mc=False):
         super(Generator, self).__init__()
 
         if norm_type == 'batch':
@@ -116,8 +164,7 @@ class Generator(nn.Module):
         conv3_block = conv3d_bn_block if batch_norm else conv3d_block
 
         self.max2_pool = nn.MaxPool2d(2)
-        self.max3_pool = nn.MaxPool3d((2, 2, 1))
-        self.upsample_only_z = nn.Upsample(scale_factor=(1, 1, 2))
+        self.max3_pool = nn.MaxPool3d((2, 2, 2))
         act = activation
 
         if mc:
@@ -129,52 +176,32 @@ class Generator(nn.Module):
             conv2_block(n_channels, nf, activation=act),
             conv2_block(nf, nf, activation=act)
         )
-        self.down1 = nn.Sequential(
-            #max2_pool,
-            conv2_block(nf, 2 * nf, activation=act),
-            conv2_block(2 * nf, 2 * nf, activation=act),
-        )
-        self.down2 = nn.Sequential(
-            #max2_pool,
-            conv2_block(2 * nf, 4 * nf, activation=act),
-            nn.Dropout(p=dropout, inplace=False),
-            conv2_block(4 * nf, 4 * nf, activation=act),
+        self.down1 = ResidualConvBlock(nf, 2 * nf, activation=act, dropout=0)
+        self.down2 = ResidualConvBlock(2 * nf, 4 * nf, activation=act, dropout=dropout)
+        self.down3 = ResidualConvBlock(4 * nf, 8 * nf, activation=act, dropout=dropout)
 
-        )
-
-        self.conv5 = nn.Sequential(
-            conv3_block(4 * nf, 4 * nf, activation=act),  # 8
-            nn.Dropout(p=dropout, inplace=False),
-            conv3_block(4 * nf, 4 * nf, activation=act),
-        )
+        self.up3 = deconv3d_bn_block(8 * nf, 4 * nf, activation=act)
+        self.conv5 = ResidualConvBlock3D(8 * nf, 4 * nf, activation=act, dropout=dropout)
         self.up2 = deconv3d_bn_block(4 * nf, 2 * nf, activation=act)
-        self.conv6 = nn.Sequential(
-            conv3_block(2 * nf, 2 * nf, activation=act),
-            nn.Dropout(p=dropout, inplace=False),
-            conv3_block(2 * nf, 2 * nf, activation=act),
-        )
-
+        self.conv6 = ResidualConvBlock3D(4 * nf, 2 * nf, activation=act, dropout=dropout)
         self.up1 = deconv3d_bn_block(2 * nf, nf, activation=act)
 
         final_layer = get_activation(final)
 
         self.conv7_k = nn.Sequential(
-            conv3_block(nf, out_channels, activation=final_layer),
+            conv3_block(2 * nf, out_channels, activation=final_layer),
         )
 
         self.conv7_g = nn.Sequential(
-            conv3_block(nf, out_channels, activation=final_layer),
+            conv3_block(2 * nf, out_channels, activation=final_layer),
         )
 
-        #if NoTanh:
-        #    self.conv7_k[-1] = self.conv7_k[-1][:-1]
-        #    self.conv7_g[-1] = self.conv7_g[-1][:-1]
-
-        self.encoder = nn.Sequential(self.down0, self.down1, self.down2)
-        self.decoder = nn.Sequential(self.conv5, self.up2, self.conv6, self.up1)
+        self.encoder = nn.Sequential(self.down0, self.down1, self.down2, self.down3)
+        self.decoder = nn.Sequential(self.up3, self.conv5, self.up2, self.conv6, self.up1)
 
     def forward(self, x, method=None):
         # x (1, C, X, Y, Z)
+
         if method != 'decode':
             x = x.permute(4, 1, 2, 3, 0)[:, :, :, :, 0]  # (Z, C, X, Y)
             feat = []
@@ -184,38 +211,46 @@ class Generator(nn.Module):
                     x = self.max3_pool(x)
                     x = x.squeeze(0).permute(3, 0, 1, 2)  # (Z, C, X, Y)
                 x = self.encoder[i](x)
-                #print(x.shape)
-                #feat.append(x.permute(1, 2, 3, 0).unsqueeze(0))
-            feat = [x.permute(1, 2, 3, 0).unsqueeze(0)]
+                feat.append(x.permute(1, 2, 3, 0).unsqueeze(0))
             if method == 'encode':
                 return feat
-            #print(x.shape)
             x = x.permute(1, 2, 3, 0).unsqueeze(0)  # (1, C, X, Y, Z)
-            #print(x.shape)
-        x = self.upsample_only_z(x)
-        x = self.decoder(x)
-        #print(x.shape)
-        x70 = self.conv7_k(x)
-        x71 = self.conv7_g(x)
-        #print(x70.shape)
+
+        if method == 'decode':
+            feat = x
+
+        [x0, x1, x2, x3] = feat
+
+        xu3 = self.up3(x3)
+        cat3 = torch.cat([xu3, x2], 1)
+        x5 = self.conv5(cat3)  # Dropout
+        xu2 = self.up2(x5)
+        cat2 = torch.cat([xu2, x1], 1)
+        x6 = self.conv6(cat2)  # Dropout
+        xu1 = self.up1(x6)
+        cat1 = torch.cat([xu1, x0], 1)
+        x70 = self.conv7_k(cat1)
+        x71 = self.conv7_g(cat1)
 
         return {'out0': x70, 'out1': x71}
 
 
 if __name__ == '__main__':
     g = Generator(n_channels=1, norm_type='batch', final='tanh')
-    #from torchsummary import summary
-    #from utils.data_utils import print_num_of_parameters
-    #print_num_of_parameters(g)
-    #f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
-    #print(f[-1].shape)
-    #out = g(f[-1], method='decode')
-    #print(out['out0'].shape)
+    # from torchsummary import summary
+    # from utils.data_utils import print_num_of_parameters
+    # print_num_of_parameters(g)
+    # f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
+    # print(f[-1].shape)
+    # out = g(f[-1], method='decode')
+    # print(out['out0'].shape)
 
-    f = g(torch.rand(1, 1, 128, 128, 16), method='encode')
-    print(f[-1].shape)
-    #upsample = torch.nn.Upsample(size=(16, 16, 128))
-    #fup = upsample(f[-1])
-    #print(fup.shape)
-    out = g(f[-1], method='decode')
+    f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
+    for ff in f:
+        print(ff.shape)
+    #print(f[-1].shape)
+    # upsample = torch.nn.Upsample(size=(16, 16, 128))
+    # fup = upsample(f[-1])
+    # print(fup.shape)
+    out = g(f, method='decode')
     print(out['out0'].shape)

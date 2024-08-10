@@ -134,8 +134,8 @@ class BaseModel(pl.LightningModule):
 
         # Final
         self.hparams.update(vars(self.hparams))   # updated hparams to be logged in tensorboard
-        #self.train_loader.dataset.shuffle_images()  # !!! shuffle again just to make sure
-        #self.train_loader.dataset.shuffle_images()  # !!! shuffle again just to make sure
+        #self.train_loader.dataset.shuffle_images()  # !!! STUPID shuffle again just to make sure
+        #self.train_loader.dataset.shuffle_images()  # !!! STUPID shuffle again just to make sure
 
         self.log_helper = NeptuneHelper()
 
@@ -297,6 +297,33 @@ class BaseModel(pl.LightningModule):
             net_g = Generator(n_channels=self.hparams.input_nc, out_channels=self.hparams.output_nc, nf=self.hparams.ngf,
                               norm_type=self.hparams.norm, final=self.hparams.final, mc=self.hparams.mc)
 
+        elif self.hparams.netG .startswith('res'):
+            print('resnet generator: ' + self.hparams.netG)
+            Generator = getattr(getattr(__import__('networks.resnet.' + self.hparams.netG), 'resnet'),
+                                self.hparams.netG).Generator
+            net_g = Generator(input_nc=self.hparams.input_nc,
+                                    output_nc=self.hparams.output_nc, ngf=self.hparams.ngf,
+                                    n_blocks=4, img_size=self.hparams.cropsize, light=True)
+
+        elif self.hparams.netG == 'ugatit':
+            from networks.ugatit.networks import ResnetGenerator
+            print('use ugatit generator')
+            net_g = ResnetGenerator(input_nc=self.hparams.input_nc,
+                                    output_nc=self.hparams.output_nc, ngf=self.hparams.ngf,
+                                    n_blocks=4, img_size=128, light=True)
+
+        elif self.hparams.netG == 'genre':
+            from networks.genre.generator.Unet_base import SPADEUNet2s
+            opt = Namespace(input_size=128, parsing_nc=1, norm_G='spectralspadebatch3x3', spade_mode='res2',
+                            use_en_feature=False)
+            net_g = SPADEUNet2s(opt=opt, in_channels=1, out_channels=1)
+
+        elif self.hparams.netG == 'unetclean':
+            from networks.unet import UNet_clean
+            opt = Namespace(input_size=128, parsing_nc=1, norm_G='spectralspadebatch3x3', spade_mode='res2',
+                            use_en_feature=False)
+            net_g = SPADEUNet2s(opt=opt, in_channels=1, out_channels=1)
+
         else:
             from networks.networks import define_G
             net_g = define_G(input_nc=self.hparams.input_nc, output_nc=self.hparams.output_nc,
@@ -309,9 +336,50 @@ class BaseModel(pl.LightningModule):
             from networks.cyclegan.models import Discriminator
             net_d = Discriminator(input_shape=(self.hparams.output_nc * 1, 256, 256), patch=int((self.hparams.netD).split('_')[-1]),
                                   ndf=self.hparams.ndf)
+        elif (self.hparams.netD).startswith('bpatch'):  # Patchgan from cyclegan (the pix2pix one is strange)
+            from networks.cyclegan.modelsb import Discriminator
+            net_d = Discriminator(input_shape=(self.hparams.output_nc * 1, 256, 256), patch=int((self.hparams.netD).split('_')[-1]))
+        elif (self.hparams.netD).startswith('cpatch'):  # Patchgan from cyclegan (the pix2pix one is strange)
+            from networks.cyclegan.modelsc import Discriminator
+            net_d = Discriminator(input_shape=(self.hparams.output_nc * 1, 256, 256), patch=int((self.hparams.netD).split('_')[-1]))
+        elif self.hparams.netD == 'sagan':
+            from networks.sagan.sagan import Discriminator
+            print('use sagan discriminator')
+            net_d = Discriminator(image_size=64)
+        elif self.hparams.netD == 'acgan':
+            from networks.acgan import Discriminator
+            print('use acgan discriminator')
+            net_d = Discriminator(img_shape=(self.hparams.output_nc_nc * 1, 256, 256), n_classes=2)
+        elif self.hparams.netD == 'attgan':
+            from networks.AttGAN.attgan import Discriminators
+            print('use attgan discriminator')
+            net_d = Discriminators(img_size=256, cls=2)
+        elif self.hparams.netD == 'descar':
+            from networks.DeScarGan.descargan import Discriminator
+            print('use descargan discriminator')
+            net_d = Discriminator(n_channels=self.hparams.output_nc * 1)
+        elif self.hparams.netD == 'ugatit':
+            from networks.ugatit.networks import Discriminator
+            print('use ugatit discriminator')
+            net_d = Discriminator(self.hparams.output_nc * 1, ndf=64, n_layers=5)
+        elif self.hparams.netD == 'ugatitb':
+            from networks.ugatit.networksb import Discriminator
+            print('use ugatitb discriminator')
+            net_d = Discriminator(self.hparams.output_nc * 1, ndf=64, n_layers=5)
+        # original pix2pix, the size of patchgan is strange, just use for pixel-D
         else:
             from networks.networks import define_D
             net_d = define_D(input_nc=self.hparams.output_nc * 1, ndf=64, netD=self.hparams.netD)
+
+        # Init. Network Parameters
+        if self.hparams.netG == 'genre':
+            print('no init netG of genre')
+        else:
+            net_g = net_g.apply(_weights_init)
+        if self.hparams.netD == 'sagan':
+            print('no init netD of sagan')
+        else:
+            net_d = net_d.apply(_weights_init)
 
         if net == 'all':
             return net_g, net_d

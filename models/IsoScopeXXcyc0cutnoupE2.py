@@ -76,8 +76,10 @@ class GAN(BaseModel):
     def __init__(self, hparams, train_loader, eval_loader, checkpoints):
         BaseModel.__init__(self, hparams, train_loader, eval_loader, checkpoints)
 
+        self.hparams.netG = 'ed023dE'
         self.hparams.final = 'tanh'
         self.net_g, self.net_d = self.set_networks()
+        self.hparams.netG = 'ed023d'
         self.hparams.final = 'tanh'
         self.net_gback, self.net_dzy = self.set_networks()
         self.net_dzx = copy.deepcopy(self.net_dzy)
@@ -152,7 +154,8 @@ class GAN(BaseModel):
         self.Xup = self.upsample(self.oriX)  # (B, C, X, Y, Z)
         #self.Yup = self.upsample(self.oriY)  # (B, C, X, Y, Z)
 
-        self.goutz = self.net_g(self.Xup, method='encode')
+        self.goutz = self.net_g(self.oriX, method='encode')
+        #print(self.goutz[-1].shape)
         self.XupX = self.net_g(self.goutz, method='decode')['out0']
 
         if not self.hparams.nocyc:
@@ -217,9 +220,9 @@ class GAN(BaseModel):
 
         if not self.hparams.nocut:
             # (X, XupX)
+            #self.goutz = self.net_g(self.Xup, method='encode')
             feat_q = self.goutz
             feat_k = self.net_g(self.XupX, method='encode')
-            #feat_k = self.net_g(self.XupXback, method='encode')
 
             feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
                                                 None)  # get source patches by random id

@@ -20,12 +20,15 @@ from networks.model_utils import get_activation
 
 sig = nn.Sigmoid()
 ACTIVATION = nn.ReLU
-#device = 'cuda'
+
+
+# device = 'cuda'
 
 
 class Flatten(torch.nn.Module):
     def forward(self, x):
         return x.reshape(x.size()[0], -1)
+
 
 def crop_and_concat(upsampled, bypass, crop=False):
     if crop:
@@ -106,7 +109,8 @@ def dense_layer_bn(in_dim, out_dim, momentum=0.01, activation=ACTIVATION):
 
 
 class Generator(nn.Module):
-    def __init__(self, n_channels=1, out_channels=1, nf=32, norm_type='batch', activation=ACTIVATION, final='tanh', mc=False):
+    def __init__(self, n_channels=1, out_channels=1, nf=32, norm_type='batch', activation=ACTIVATION, final='tanh',
+                 mc=False):
         super(Generator, self).__init__()
 
         if norm_type == 'batch':
@@ -116,7 +120,7 @@ class Generator(nn.Module):
         conv3_block = conv3d_bn_block if batch_norm else conv3d_block
 
         self.max2_pool = nn.MaxPool2d(2)
-        self.max3_pool = nn.MaxPool3d((2, 2, 1))
+        self.max3_pool = nn.MaxPool3d((2, 2, 2))
         act = activation
 
         if mc:
@@ -129,19 +133,19 @@ class Generator(nn.Module):
             conv2_block(nf, nf, activation=act)
         )
         self.down1 = nn.Sequential(
-            #max2_pool,
+            # max2_pool,
             conv2_block(nf, 2 * nf, activation=act),
             conv2_block(2 * nf, 2 * nf, activation=act),
         )
         self.down2 = nn.Sequential(
-            #max2_pool,
+            # max2_pool,
             conv2_block(2 * nf, 4 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
             conv2_block(4 * nf, 4 * nf, activation=act),
 
         )
         self.down3 = nn.Sequential(
-            #max2_pool,
+            # max2_pool,
             conv2_block(4 * nf, 8 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
             conv2_block(8 * nf, 8 * nf, activation=act),
@@ -150,13 +154,13 @@ class Generator(nn.Module):
         self.up3 = deconv3d_bn_block(8 * nf, 4 * nf, activation=act)
 
         self.conv5 = nn.Sequential(
-            conv3_block(4 * nf, 4 * nf, activation=act),  # 8
+            conv3_block(8 * nf, 4 * nf, activation=act),  # 8
             nn.Dropout(p=dropout, inplace=False),
             conv3_block(4 * nf, 4 * nf, activation=act),
         )
         self.up2 = deconv3d_bn_block(4 * nf, 2 * nf, activation=act)
         self.conv6 = nn.Sequential(
-            conv3_block(2 * nf, 2 * nf, activation=act),
+            conv3_block(4 * nf, 2 * nf, activation=act),
             nn.Dropout(p=dropout, inplace=False),
             conv3_block(2 * nf, 2 * nf, activation=act),
         )
@@ -166,14 +170,14 @@ class Generator(nn.Module):
         final_layer = get_activation(final)
 
         self.conv7_k = nn.Sequential(
-            conv3_block(nf, out_channels, activation=final_layer),
+            conv3_block(2 * nf, out_channels, activation=final_layer),
         )
 
         self.conv7_g = nn.Sequential(
-            conv3_block(nf, out_channels, activation=final_layer),
+            conv3_block(2 * nf, out_channels, activation=final_layer),
         )
 
-        #if NoTanh:
+        # if NoTanh:
         #    self.conv7_k[-1] = self.conv7_k[-1][:-1]
         #    self.conv7_g[-1] = self.conv7_g[-1][:-1]
 
@@ -191,37 +195,60 @@ class Generator(nn.Module):
                     x = self.max3_pool(x)
                     x = x.squeeze(0).permute(3, 0, 1, 2)  # (Z, C, X, Y)
                 x = self.encoder[i](x)
-                #print(x.shape)
                 feat.append(x.permute(1, 2, 3, 0).unsqueeze(0))
-            #feat = [x.permute(1, 2, 3, 0).unsqueeze(0)]
+            # feat = [x.permute(1, 2, 3, 0).unsqueeze(0)]
             if method == 'encode':
                 return feat
-            #print(x.shape)
+            # print(x.shape)
             x = x.permute(1, 2, 3, 0).unsqueeze(0)  # (1, C, X, Y, Z)
-            #print(x.shape)
-        x = self.decoder(x)
-        #print(x.shape)
-        x70 = self.conv7_k(x)
-        x71 = self.conv7_g(x)
-        #print(x70.shape)
+            # print(x.shape)
+
+        # x = self.decoder(x)
+        # x70 = self.conv7_k(x)
+        # x71 = self.conv7_g(x)
+        # print(x70.shape)
+
+        alpha = 1
+        if method == 'decode':
+            feat = x
+
+        [x0, x1, x2, x3] = feat
+
+        xu3 = self.up3(x3)
+        # alpha
+        x2 = alpha * x2 + (1 - alpha) * xu3  # alpha means the features from the encoder are connecting, or it is replaced by the features from the decoder
+        xu3_ = xu3  # .detach()
+        cat3 = torch.cat([xu3_, x2], 1)
+        x5 = self.conv5(cat3)  # Dropout
+        xu2 = self.up2(x5)
+        # alpha
+        x1 = alpha * x1 + (1 - alpha) * xu2
+        xu2_ = xu2  # .detach()
+        cat2 = torch.cat([xu2_, x1], 1)
+        x6 = self.conv6(cat2)  # Dropout
+        xu1 = self.up1(x6)
+        xu1_ = xu1  # .detach()
+        cat1 = torch.cat([xu1_, x0], 1)
+        x70 = self.conv7_k(cat1)
+        x71 = self.conv7_g(cat1)
 
         return {'out0': x70, 'out1': x71}
 
 
 if __name__ == '__main__':
     g = Generator(n_channels=1, norm_type='batch', final='tanh')
-    #from torchsummary import summary
-    #from utils.data_utils import print_num_of_parameters
-    #print_num_of_parameters(g)
-    #f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
-    #print(f[-1].shape)
-    #out = g(f[-1], method='decode')
-    #print(out['out0'].shape)
+    # from torchsummary import summary
+    # from utils.data_utils import print_num_of_parameters
+    # print_num_of_parameters(g)
+    # f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
+    # print(f[-1].shape)
+    # out = g(f[-1], method='decode')
+    # print(out['out0'].shape)
 
-    f = g(torch.rand(1, 1, 64, 64, 8), method='encode')
-    print(f[-1].shape)
-    #upsample = torch.nn.Upsample(size=(16, 16, 128))
-    #fup = upsample(f[-1])
-    #print(fup.shape)
-    out = g(f[-1], method='decode')
+    f = g(torch.rand(1, 1, 128, 128, 128), method='encode')
+    #print(f[-1].shape)
+    # upsample = torch.nn.Upsample(size=(16, 16, 128))
+    # fup = upsample(f[-1])
+    # print(fup.shape)
+    out = g(f, method='decode')
     print(out['out0'].shape)

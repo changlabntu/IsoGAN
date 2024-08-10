@@ -328,7 +328,7 @@ parser = args_train()
 args = parser.parse_args()
 
 load_dotenv('env/.t09b')
-x = pd.read_csv('env/womac4_moaks.csv')
+x = pd.read_csv('../../env/womac4_moaks.csv')
 labels = (x.loc[x['SIDE'] == 'RIGHT']['V$$WOMKP#']).values > (x.loc[x['SIDE'] == 'LEFT']['V$$WOMKP#']).values
 labels = [int(x) for x in labels]
 knee_painful = x.loc[(x['V$$WOMKP#'] > 0)].reset_index()

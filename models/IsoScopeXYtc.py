@@ -78,28 +78,24 @@ class GAN(BaseModel):
 
         self.hparams.final = 'tanh'
         self.net_g, self.net_d = self.set_networks()
-        self.hparams.final = 'tanh'
-        self.net_gback, self.net_dzy = self.set_networks()
-        self.net_dzx = copy.deepcopy(self.net_dzy)
+        self.net_dM = copy.deepcopy(self.net_d)
 
         # save model names
-        self.netg_names = {'net_g': 'net_g', 'net_gback': 'net_gback'}
-        self.netd_names = {'net_d': 'net_d', 'net_dzy': 'net_dzy', 'net_dzx': 'net_dzx'}
-        #self.netg_names = {'net_gy': 'net_gy'}
-        #self.netd_names = {'net_dy': 'net_dy'}
+        self.netg_names = {'net_g': 'net_g'}#, 'net_gback': 'net_gback'}
+        self.netd_names = {'net_d': 'net_d', 'net_dM': 'net_dM'}
 
         # Finally, initialize the optimizers and scheduler
         self.configure_optimizers()
 
-        if self.hparams.cropz > 0:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropz * hparams.uprate), mode='trilinear')
-        else:
-            self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, 32 * hparams.uprate), mode='trilinear')
+        self.upsample = torch.nn.Upsample(size=(hparams.cropsize, hparams.cropsize, hparams.cropsize), mode='trilinear')
+
+        self.uprate = (hparams.cropsize // hparams.cropz)
+        print('uprate: ' + str(self.uprate))
 
         # CUT NCE
         if not self.hparams.nocut:
             netF = PatchSampleF3D(use_mlp=self.hparams.use_mlp, init_type='normal', init_gain=0.02, gpu_ids=[],
-                                nc=self.hparams.c_mlp)
+                                  nc=self.hparams.c_mlp)
             self.netF = init_net(netF, init_type='normal', init_gain=0.02, gpu_ids=[])
             feature_shapes = [x * self.hparams.ngf for x in [1, 2, 4, 8]]
             self.netF.create_mlp(feature_shapes)
@@ -120,7 +116,6 @@ class GAN(BaseModel):
         parser = parent_parser.add_argument_group("LitModel")
         # coefficient for the identify loss
         parser.add_argument("--lambI", type=int, default=0.5)
-        parser.add_argument("--uprate", type=int, default=4)
         parser.add_argument("--skipl1", type=int, default=1)
         parser.add_argument("--nocyc", action='store_true')
         parser.add_argument("--nocut", action='store_true')
@@ -133,6 +128,8 @@ class GAN(BaseModel):
         parser.add_argument('--use_mlp', action='store_true')
         parser.add_argument("--c_mlp", dest='c_mlp', type=int, default=256, help='channel of mlp')
         parser.add_argument('--fWhich', nargs='+', help='which layers to have NCE loss', type=int, default=None)
+        parser.add_argument('--transpose', action='store_true', help='transpose to the yz plane')
+        parser.add_argument('--tc', action='store_true', help='two channel')
         return parent_parser
 
     def test_method(self, net_g, img):
@@ -144,22 +141,38 @@ class GAN(BaseModel):
         if self.hparams.cropz > 0:
             z_init = np.random.randint(batch['img'][0].shape[4] - self.hparams.cropz)
             batch['img'][0] = batch['img'][0][:, :, :, :, z_init:z_init + self.hparams.cropz]
-        #batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + self.hparams.cropz]
+            if self.hparams.tc:
+                batch['img'][1] = batch['img'][1][:, :, :, :, z_init:z_init + self.hparams.cropz]
 
         self.oriX = batch['img'][0]  # (B, C, X, Y, Z) # original
-        #self.oriY = batch['img'][1]  # (B, C, X, Y, Z) # original
-
         self.Xup = self.upsample(self.oriX)  # (B, C, X, Y, Z)
-        #self.Yup = self.upsample(self.oriY)  # (B, C, X, Y, Z)
 
-        self.goutz = self.net_g(self.Xup, method='encode')
-        self.XupX = self.net_g(self.goutz, method='decode')['out0']
+        if self.hparams.tc:
+            self.oriM = batch['img'][1]  # (B, C, X, Y, Z) # original
+            self.Mup = self.upsample(self.oriM)  # (B, C, X, Y, Z)
 
-        if not self.hparams.nocyc:
-            self.XupXback = self.net_gback(self.XupX)['out0']
+        if self.hparams.transpose:
+            self.Xup = self.Xup.permute(0, 1, 3, 4, 2)  # (B, C, Y, Z, X)
 
-    def get_xy_plane(self, x):  # (B, C, X, Y, Z)
-        return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]  # (Z, C, X, Y, B)
+        if self.hparams.tc:
+            self.goutz = self.net_g(torch.cat([self.Xup, self.Mup], dim=1), method='encode')
+            out = self.net_g(self.goutz, method='decode')
+            self.XupX = out['out0']
+            self.MupM = out['out1']
+        else:
+            self.goutz = self.net_g(self.Xup, method='encode')
+            self.XupX = self.net_g(self.goutz, method='decode')['out0']
+
+        #if not self.hparams.nocyc:
+        #    if self.hparams.tc:
+        #        out = self.net_gback(torch.cat([self.XupX, self.MupM], dim=1))
+        #        self.XupXback = out['out0']
+        #        self.MupMback = out['out1']
+        #    else:
+        #        self.XupXback = self.net_gback(self.XupX)['out0']
+
+    def get_xy_plane(self, x):
+        return x.permute(4, 1, 2, 3, 0)[::1, :, :, :, 0]
 
     def adv_loss_six_way(self, x, net_d, truth):
         loss = 0
@@ -200,26 +213,31 @@ class GAN(BaseModel):
         loss_dict = {}
 
         axx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=True)
-        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.hparams.uprate * self.hparams.skipl1],
-                                   b=self.oriX[:, :, :, :, ::self.hparams.skipl1]) * self.hparams.lamb
+        axxM = self.adv_loss_six_way(self.MupM, net_d=self.net_dM, truth=True)
+        loss_l1 = self.add_loss_l1(a=self.XupX[:, :, :, :, ::self.uprate * self.hparams.skipl1],
+                                   b=self.Xup[:, :, :, :, ::self.uprate * self.hparams.skipl1]) * self.hparams.lamb
+        loss_l1M = self.add_loss_l1(a=self.MupM[:, :, :, :, ::self.uprate * self.hparams.skipl1],
+                                    b=self.Mup[:, :, :, :, ::self.uprate * self.hparams.skipl1]) * self.hparams.lamb
 
         loss_dict['axx'] = axx
-        loss_g += axx
+        loss_dict['axxM'] = axxM
+        loss_g += axx + axxM
         loss_dict['l1'] = loss_l1
-        loss_g += loss_l1
+        loss_dict['l1M'] = loss_l1M
+        loss_g += loss_l1 + loss_l1M
 
-        if not self.hparams.nocyc:
-            gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
-            loss_dict['gback'] = gback
-            loss_g += gback
-            if self.hparams.lamb > 0:
-                loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
+        #if not self.hparams.nocyc:
+        #    gback = self.adv_loss_six_way_y(self.XupXback, truth=True)
+        #    loss_dict['gback'] = gback
+        #    loss_g += gback
+        #    if self.hparams.lamb > 0:
+        #        loss_g += self.add_loss_l1(a=self.XupXback, b=self.Xup) * self.hparams.lamb
 
         if not self.hparams.nocut:
             # (X, XupX)
+            #self.goutz = self.net_g(self.Xup, method='encode')
             feat_q = self.goutz
-            feat_k = self.net_g(self.XupX, method='encode')
-            #feat_k = self.net_g(self.XupXback, method='encode')
+            feat_k = self.net_g(torch.cat([self.XupX, self.MupM], 1), method='encode')
 
             feat_k_pool, sample_ids = self.netF(feat_k, self.hparams.num_patches,
                                                 None)  # get source patches by random id
@@ -242,19 +260,22 @@ class GAN(BaseModel):
         loss_dict = {}
 
         dxx = self.adv_loss_six_way(self.XupX, net_d=self.net_d, truth=False)
+        dxxM = self.adv_loss_six_way(self.MupM, net_d=self.net_dM, truth=False)
         # ADV(X)+
         dx = self.add_loss_adv(a=self.get_xy_plane(self.oriX), net_d=self.net_d, truth=True)
+        dxM = self.add_loss_adv(a=self.get_xy_plane(self.oriM), net_d=self.net_dM, truth=True)
 
         loss_dict['dxx_x'] = dxx + dx
-        loss_d += dxx + dx
+        loss_dict['dxx_xM'] = dxxM + dxM
+        loss_d += dxx + dx + dxxM + dxM
 
         # ADV dyy
-        if not self.hparams.nocyc:
-            dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
-            dy = self.adv_loss_six_way_y(self.oriX, truth=True)
+        #if not self.hparams.nocyc:
+        #    dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
+        #    dy = self.adv_loss_six_way_y(self.Xup, truth=True)
 
-            loss_dict['dyy'] = dyy + dy
-            loss_d += dyy + dy
+        #    loss_dict['dyy'] = dyy + dy
+        #    loss_d += dyy + dy
 
         loss_dict['sum'] = loss_d
 
@@ -262,4 +283,4 @@ class GAN(BaseModel):
 
 
 # USAGE
-# python train.py --jsn cyc_imorphics --prj IsoScope0/0 --models IsoScope0 --cropz 16 --cropsize 128 --netG ed023d --env t09 --adv 1 --rotate --ngf 64 --direction xyori --nm 11 --dataset longdent
+# python train.py --jsn cyc_imorphics --prj IsoScopeXY/ngf32lb10 --models IsoScopeXY --cropz 20 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction xyori --nm 00 --netG ed023d --dataset Fly0B --n_epochs 6000 --lr_policy cosine --mc --lamb 10 --skipl1 4

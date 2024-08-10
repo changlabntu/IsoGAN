@@ -18,21 +18,24 @@ Fly0B:
 
 BraTSReg:
   dataset: "BraTSReg"
-  trd: 4000
-  prj: "/IsoScopeXX/cyc0lb1skip4ndf32Try2/"
-  epoch: 320
-  uprate: 1
+  trd: 1
+  #prj: "/IsoScopeXX/unet/0/"
+  prj: "/IsoScopeXX/t1normcrop/"
+  epoch: 1900
+  #uprate: 4
   upsample_params:
-    size: [128, 128, 128]
+    size: [128, 256, 256]
   patch_range:
     start_dim0: -128
     end_dim0: null
-    start_dim1: 64
-    end_dim1: -64
-    start_dim2: 64
-    end_dim2: -64
-  image_list_path: "/media/ExtHDD01/Dataset/paired_images/BraTSReg/train/t1norm/*.tif"
-  norm_method: "01"
+    start_dim1: null
+    end_dim1: 256
+    start_dim2: null
+    end_dim2: 256
+  #image_list_path: "/media/ExtHDD01/Dataset/paired_images/BraTSReg/train/t1norm/*.tif"
+  image_list_path: "/media/ExtHDD01/Dataset/paired_images/BraTSReg/train/t1normcroptest/*.tif"
+  image_list_index: 0
+  norm_method: "11"
 
 womac4:
   dataset: "womac4"
@@ -81,10 +84,10 @@ weikun060524:
 Dayu1:
   dataset: "Dayu1"
   trd: 424
-  prj: "/IsoScopeXYftr0/ngf32ndf32lb10skip4exp0nocyc/"
+  prj: "/IsoScopeXYftr0/ngf32ndf32lb10skip4exp0nocycunet/"
   epoch: 1000
   upsample_params:
-    size: [256, 256, 256]
+    size: [256, 128, 256]
   patch_range:
     start_dim0: 168
     end_dim0: 208
@@ -99,12 +102,44 @@ Dayu1:
   assemble: True
   assemble_params:
     C: 64 # cropped pixels
-    dx_shape: [40, 256, 256] # inference size
+    dx_shape: [40, 128, 256] # inference size
     sx_shape: [20, 128, 128] # step size
-    weight_shape: [ 128, 256, 128 ]
+    weight_shape: [ 128, 128, 128 ]
     weight_method: "cross"
     zrange_start: 4
-    zrange_end: 12
+    zrange_end: -1
+    xrange_start: 3
+    xrange_end: 4
+    yrange_start: 0
+    yrange_end: -2
+
+DPM4X:
+  dataset: "DPM4X"
+  prj: "/IsoScopeXYtc/noskipl1/"
+  epoch: 3000
+  upsample_params:
+    size: [256, 128, 256]
+  patch_range:
+    start_dim0: 168
+    end_dim0: 208
+    start_dim1: 230
+    end_dim1: 486
+    start_dim2: 384
+    end_dim2: 640
+  image_path: ["/media/ExtHDD01/Dataset/paired_images/DPM4X/ori/3-2ROI000.tif", "/media/ExtHDD01/Dataset/paired_images/DPM4X/ft0/3-2ROI000.tif"]
+  norm_method: ["exp", "11"]
+  exp_trd: [[100, 424], None]
+  exp_ftr: [6, None]
+  trd: [None, 4]
+  assemble: True
+  assemble_params:
+    C: 64 # cropped pixels
+    dx_shape: [40, 128, 256] # inference size
+    sx_shape: [20, 128, 128] # step size
+    weight_shape: [ 128, 128, 128 ]
+    weight_method: "cross"
+    zrange_start: 4
+    zrange_end: -1
     xrange_start: 3
     xrange_end: 4
     yrange_start: 0

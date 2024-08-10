@@ -1,0 +1,1 @@
+python train.py --jsn cyc_imorphics --prj IsoScopeXYtc/skipli1 --models IsoScopeXYtc --cropz 20 --cropsize 128 --env runpod --adv 1 --rotate --ngf 32 --direction oripatch_ft0patch --nm 00 --netG ed023dunet --dataset DPM4X --n_epochs 10000 --lr_policy cosine --mc --lamb 10 --skipl1 1 --ndf 32 --input_nc 2 --epoch_save 100 --save_d --nocyc --env a6k --tc

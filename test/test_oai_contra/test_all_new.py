@@ -387,7 +387,7 @@ def svm_by_difference_to_shuffled_not_useful():
 
 def moaks_index():
     load_dotenv('env/.t09b')
-    x = pd.read_csv('../env/womac4_moaks.csv')
+    x = pd.read_csv('../../env/womac4_moaks.csv')
     pain_right = (x.loc[x['SIDE'] == 'RIGHT']['V$$WOMKP#']).values
     pain_left = (x.loc[x['SIDE'] == 'LEFT']['V$$WOMKP#']).values
     pain_val = np.maximum(pain_right, pain_left)

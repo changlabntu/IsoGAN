@@ -153,7 +153,10 @@ class GAN(BaseModel):
             self.Xup = self.Xup.permute(0, 1, 3, 4, 2)  # (B, C, Y, Z, X)
 
         self.goutz = self.net_g(self.Xup, method='encode')
-        self.XupX = self.net_g(self.goutz[-1], method='decode')['out0']
+        if self.hparams.netG == 'ed023dunet':
+            self.XupX = self.net_g(self.goutz, method='decode')['out0']
+        else:
+            self.XupX = self.net_g(self.goutz[-1], method='decode')['out0']
 
         if not self.hparams.nocyc:
             self.XupXback = self.net_gback(self.XupX)['out0']

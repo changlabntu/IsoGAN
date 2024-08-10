@@ -24,40 +24,45 @@ def tif_to_patches(npys, **kwargs):
     (dz, dx, dy) = kwargs['dh']  # (64, 256, 256)
     (sz, sx, sy) = kwargs['step']
 
-    os.makedirs(root + kwargs['destination'], exist_ok=True)
+    for i in range(len(npys)):
+        os.makedirs(root + kwargs['destination'][i], exist_ok=True)
 
-    npy = npys[0]
+    for i in range(len(npys)):
+        if kwargs['trd'][i] is not None:
+            npys[i][npys[i] < kwargs['trd'][i][0]] = kwargs['trd'][i][0]
+            npys[i][npys[i] > kwargs['trd'][i][1]] = kwargs['trd'][i][1]
 
-    if kwargs['trd'] is not None:
-        npy[npy < kwargs['trd'][0]] = kwargs['trd'][0]
-        npy[npy > kwargs['trd'][1]] = kwargs['trd'][1]
+        if kwargs['norm'][i] is not None:
+            if kwargs['norm'][i] == 'zrescale':
+                npys[i] = z_rescale(npys[i], trd=kwargs['zrescale'])
+            elif kwargs['norm'][i] == '01':
+                npys[i] = (npys[i] - npys[i].min()) / (npys[i].max() - npys[i].min())
+            elif kwargs['norm'][i] == '11':
+                npys[i] = (npys[i] - npys[i].min()) / (npys[i].max() - npys[i].min())
+                npys[i] = (npys[i] - 0.5) * 2
 
-    if kwargs['zrescale'] is not None:
-        npy = z_rescale(npy, trd=kwargs['zrescale'])
-    else:
-        if kwargs['norm'] is not None:
-            if kwargs['norm'] == '01':
-                npy = (npy - npy.min()) / (npy.max() - npy.min())
-            elif kwargs['norm'] == '11':
-                npy = (npy - npy.min()) / (npy.max() - npy.min())
-                npy = (npy - 0.5) * 2
 
-    for z in range(npy.shape[0] // sz):
-        for x in range(npy.shape[1] // sx):
-            for y in range(npy.shape[2] // sy):
-                    #print(z, x, y)
-                    volume = npy[z * dz : (z+1) * dz, x * dx : (x+1) * dx, y * dy : (y+1) * dy]
-                    if volume.shape == (dz, dx, dy):
-                        if kwargs['permute'] is not None:
-                            volume = np.transpose(volume, kwargs['permute'])
-                        for s in range(volume.shape[0]):
-                            patch = volume[s, ::]
-                            if volume.mean() > kwargs['ftr']:
-                                if kwargs['norm'] is not None:
+    for z in range(npys[0].shape[0] // sz):
+        for x in range(npys[0].shape[1] // sx):
+            for y in range(npys[0].shape[2] // sy):
+                    print(z, x, y)
+                    volumes = []
+                    for i in range(0, len(npys)):
+                        volumes.append(npys[i][z * dz : (z+1) * dz, x * dx : (x+1) * dx, y * dy : (y+1) * dy])
+
+                    if volumes[0].shape == (dz, dx, dy):
+                        if volumes[0].mean() > kwargs['ftr']:
+                            if kwargs['permute'] is not None:
+                                for i in range(1, len(npys)):
+                                    volumes[i] = np.transpose(volumes[i], kwargs['permute'])
+                            for i in range(0, len(npys)):
+                                for s in range(volumes[0].shape[0]):
+                                    patch = volumes[i][s, ::]
+                                    #if kwargs['norm'] is not None:
                                     patch = patch.astype(np.float32)
-                                #tiff.imwrite(root + kwargs['destination'] + kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
-                                            #'_' + str(s).zfill(4) + '.tif', patch)
-                                tiff.imwrite(root + kwargs['destination'] + str(volume.mean())[:7] + '_' + str(s).zfill(4) + '.tif', patch)
+                                    tiff.imwrite(root + kwargs['destination'][i] + kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) +
+                                                '_' + str(s).zfill(4) + '.tif', patch)
+                                    #tiff.imwrite(root + kwargs['destination'][i] + str(volumes[0].mean())[:7] + '_' + str(s).zfill(4) + '.tif', patch)
 
 
 #def main(source, destination, dh, step, permute, trds, norm, prefix, ftr):
@@ -101,12 +106,26 @@ def get_average(source, destination):
     #all = [tiff.imread(x) for x in l]
     #all = np.stack(all, 3)
 
-#resampling(source=root + 'xyori.tif',
-#           destination=root + 'xyzorix6.tif',
-#           size=[50, -1, -1])
+if 1:
+    #root = '/workspace/Data/DPM4X/'
+    #suffix = ''
+    #for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
+    #    main(source=[s + suffix],
+    #         destination=['xyori512' + suffix],
+    #         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
 
-#root = '/workspace/Data/paired_images/longone/'
-#root = '/media/ExtHDD01/Dataset/paired_images/longone/'
+    #root = '/workspace/Data/DPM4X/'
+    #root = '/media/ExtHDD01/Dataset/paired_images/DPM4X/'
+    root = '/home/ubuntu/Data/Dataset/paired_images/DPM4X/'
+    suffix = ''
+    for s in ['ori/3-2ROI00' + str(x) for x in range(10)]:##, '3-2ROI002', '3-2ROI006', '3-2ROI008']:
+        npy0 = tiff.imread(root + s + '.tif')
+        npy1 = tiff.imread((root + s + '.tif').replace('/ori/', '/ft0/'))
+        tif_to_patches([npy0, npy1],
+                       destination=['oripatch/', 'ft0patch/'],
+                       dh=(32, 256, 256), step=(32, 256, 256), permute=None,
+                       trd=((100, 424), (0, 4)), norm=('zrescale', '11'),
+                       prefix=s.split('.')[0].split('/')[-1] + '-', ftr=0, zrescale=6)
 
 if 0:
     root = '/workspace/Data/x2404g102/'
@@ -133,42 +152,11 @@ if 0:
 
 
 if 0:
-    slices = sorted(glob.glob('/media/ExtHDD01/BRC/3DIntestine/SCFA_SNCA/Dendrite/*'))
-
-    cropped = []
-    for z in range(700, 720):
-        print(z)
-        x = tiff.imread(slices[z])
-        x = x[5500-1024:5500+1024, 1700-1024:1700+1024]
-        cropped.append(x)
-    cropped = np.stack(cropped, 0)
-    tiff.imwrite('/media/ExtHDD01/Dataset/paired_images/longone/xyoriB.tif', cropped)
-
-if 0:
     root = '/workspace/Data/Dayu1/'
     suffix = ''
     main(source=['xyori' + suffix],
          destination=['xyori' + suffix],
          dh=(32, 256, 256), step=(32, 256, 256), permute=None, trds=[424], norm='11')
-
-if 1:
-    #root = '/workspace/Data/DPM4X/'
-    #suffix = ''
-    #for s in ['3-2ROI000', '3-2ROI002', '3-2ROI006', '3-2ROI008']:
-    #    main(source=[s + suffix],
-    #         destination=['xyori512' + suffix],
-    #         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[424], norm='11', prefix=s.split('.')[0] + '-')
-
-    #root = '/workspace/Data/DPM4X/'
-    root = '/media/ExtHDD01/Dataset/paired_images/DPM4X/'
-    suffix = ''
-    for s in ['ori/3-2ROI00' + str(x) for x in range(10)]:##, '3-2ROI002', '3-2ROI006', '3-2ROI008']:
-        npy0 = tiff.imread(root + s + '.tif')
-        #npy1 = tiff.imread((root + s + '.tif').replace('/ori/', '/pseudo/'))
-        tif_to_patches([npy0],
-                       destination='temp/',
-                       dh=(32, 256, 256), step=(32, 256, 256), permute=None,
-                       trd=(100, 424), norm='11',  prefix=s.split('.')[0] + '-', ftr=0, zrescale=6)
 
 
 if 0:
@@ -195,6 +183,28 @@ if 0:
     #tif_to_patches(npy,
     #     destination='zyori8/',
     #     dh=(32, 512, 512), step=(32, 512, 512), permute=(1, 0, 2), trd=2000, norm='11', prefix='', ftr=-1)
+
+if 0:
+    #root = '/workspace/Data/Fly0B/'
+    root = '/media/ExtHDD01/Dataset/paired_images/Fly0B/'
+    suffix = ''
+    npy = tiff.imread(root + 'xyori' + '.tif')
+    #main(source=['xyori' + suffix],
+    #     destination=['xyoriftr' + suffix],
+    #     dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[2000], norm='11', prefix='', ftr=-1)
+
+    tif_to_patches([npy],
+                   destination=('temp/', ),
+                   dh=(32, 512, 512), step=(32, 512, 512), permute=None,
+                   trd=((0, 2000), ), norm=('11', ), prefix='', ftr=-100)
+
+if 0:
+    root = '/workspace/Data/Fly0B/'
+    #root = '/media/ExtHDD01/Dataset/paired_images/Fly0B/'
+    suffix = ''
+    main(source=['xyori' + suffix],
+         destination=['xyoriftr' + suffix],
+         dh=(32, 512, 512), step=(32, 512, 512), permute=None, trds=[2000], norm='11', prefix='', ftr=-1)
 
 if 0:
     root = '/media/ExtHDD01/BRC/JY_20240605/'

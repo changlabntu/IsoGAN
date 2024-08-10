@@ -16,13 +16,18 @@ import yaml
 
 
 def get_one_out(x0, model):
-    x0 = x0.unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2)  # (B, C, H, W, D)
+    x0 = [x.unsqueeze(0).unsqueeze(0).float().permute(0, 1, 3, 4, 2) for x in x0]
 
-    if gpu:
-        out_all = model(x0.cuda(), method='encode')[-1].cpu().detach()
-        out_all = model(out_all.cuda(), method='decode')['out0'].cpu().detach()
+    #if gpu:
+
+    if len(x0) > 1:
+        out_all = model(torch.cat([x0[0].cuda(), x0[1].cuda()], 1))['out0'].cpu().detach()
     else:
         out_all = model(x0)['out0'].cpu().detach()
+
+    # no gpu
+    #else:
+    #    out_all = model(x0)['out0'].cpu().detach()
 
     out_all = out_all.numpy()[0, 0, :, :, :]
     return out_all
@@ -31,27 +36,25 @@ def get_one_out(x0, model):
 def test_IsoScope(x0, model, **kwargs):
     out_all = []
     for m in range(mc):
-
         tini = time.time()
-        patch = x0[:, :, kwargs['patch_range']['start_dim0']:kwargs['patch_range']['end_dim0'],
-                kwargs['patch_range']['start_dim1']:kwargs['patch_range']['end_dim1'],
-                kwargs['patch_range']['start_dim2']:kwargs['patch_range']['end_dim2']]
-        #patch = torch.from_numpy(patch).unsqueeze(0).unsqueeze(0).float()
 
-        # normalize patch  to [-1, 1]
-        #patch = (patch - patch.min()) / (patch.max() - patch.min())
-        #patch = patch * 2 - 1
+        patch = [x[:, :, kwargs['patch_range']['start_dim0']:kwargs['patch_range']['end_dim0'],
+            kwargs['patch_range']['start_dim1']:kwargs['patch_range']['end_dim1'],
+            kwargs['patch_range']['start_dim2']:kwargs['patch_range']['end_dim2']] for x in x0]
+
+        # extra downsampling z
+        #patch = patch[:, :, ::4, :, :]
+        #patch = nn.Upsample(scale_factor=(0.25, 1, 1), mode='trilinear')(patch)
 
         if gpu:
-            patch = patch.cuda()
-        patch = upsample(patch).squeeze()
+            patch = [x.cuda() for x in patch]
 
-        #patch = patch.permute(1, 2, 0)
+        patch = [upsample(x).squeeze() for x in patch]
+
         out = get_one_out(patch, model)
-        #out = np.transpose(out, (2, 0, 1))
         out = np.transpose(out, (2, 0, 1))
         if gpu:
-            patch = patch.cpu().detach()
+            patch = patch[0].cpu().detach()
         print('Time:', time.time() - tini)
 
         out_all.append(out)
@@ -72,14 +75,9 @@ def assemble_microscopy_volumne(kwargs, w, zrange, xrange, yrange, source):
         for iz in zrange:
             one_row = []
             for iy in yrange:
-                #print(iz, ix, iy)
                 x = tiff.imread(source + str(iz) + '_' + str(ix) + '_' + str(iy) + '.tif')
                 cropped = x[C:-C, :, C:-C]
                 cropped = np.multiply(cropped, w)
-                cropped[:5, :, :] = 1
-                cropped[-5:, :, :] = 1
-                cropped[:, :, :5] = 1
-                cropped[:, :, -5:] = 1
                 if len(one_row) > 0:
                     one_row[-1][:, :, -C:] = one_row[-1][:, :, -C:] + cropped[:, :, :C]
                     one_row.append(cropped[:, :, 64:])
@@ -87,7 +85,6 @@ def assemble_microscopy_volumne(kwargs, w, zrange, xrange, yrange, source):
                     one_row.append(cropped)
             one_row = np.concatenate(one_row, axis=2)
             one_row = np.transpose(one_row, (1, 0, 2))
-            print(one_row.shape)
 
             if len(one_column) > 0:
                 one_column[-1][:, -C:, :] = one_column[-1][:, -C:, :] + one_row[:, :C, :]
@@ -95,15 +92,13 @@ def assemble_microscopy_volumne(kwargs, w, zrange, xrange, yrange, source):
             else:
                 one_column.append(one_row)
         one_column = np.concatenate(one_column, axis=1).astype(np.float32)
-        #one_column[8:-8, :, :].astype(np.float32)
     tiff.imwrite(source[:-1] + '.tif', one_column)
 
 
-def test_microscopy_volumne(kwargs, dx, dy, dz, zrange, xrange, yrange, destination):
+def test_over_volumne(kwargs, dx, dy, dz, zrange, xrange, yrange, destination):
     for ix in xrange:#range(0, x0.shape[2], sz)[:]:
         for iz in zrange:#[1536]:#range(0, x0.shape[3], sx):
             for iy in yrange:#range(0, x0.shape[4], sy)[:]:
-                print(iz, ix, iy, iz+dz, ix+dx, iy+dy)
                 kwargs['patch_range'] = {'start_dim0': iz, 'end_dim0': iz + dz,
                                          'start_dim1': ix, 'end_dim1': ix + dx,
                                          'start_dim2': iy, 'end_dim2': iy + dy}
@@ -121,9 +116,11 @@ def get_model(kwargs, gpu):
     dataset = kwargs['dataset']
     prj = kwargs['prj']
     epoch = kwargs['epoch']
-    model = torch.load(
-        '/media/ExtHDD01/logs/' + dataset + prj + '/checkpoints/net_g_model_epoch_' + str(epoch) + '.pth',
-        map_location=torch.device('cpu'))  # .cuda()#.eval()
+    model_name = '/media/ExtHDD01/logs/' + dataset + prj + '/checkpoints/net_g_model_epoch_' + str(epoch) + '.pth'
+    print(model_name)
+    model = torch.load(model_name, map_location=torch.device('cpu'))#.eval()  # .cuda()#.eval()
+    if eval:
+        model = model.eval()
     upsample = torch.nn.Upsample(size=kwargs['upsample_params']['size'], mode='trilinear')
     if gpu:
         model = model.cuda()
@@ -181,7 +178,10 @@ def get_args(option, config_name):
     kwargs = config.get(option, {})
     if not kwargs:
         raise ValueError(f"Option {option} not found in the configuration.")
+    return kwargs
 
+
+def get_data(kwargs):
     image_path = kwargs.get("image_path")  # if image path is a file
     image_list_path = kwargs.get("image_list_path")  # if image path is a directory
 
@@ -194,28 +194,49 @@ def get_args(option, config_name):
         x0 = tiff.imread(x_list[kwargs.get("image_list_index")])
     else:
         raise ValueError("No valid image path provided.")
+    return list(x0)
 
-    return x0, kwargs
 
 
-def norm_x0(x0, kwargs):
+def norm_x0X(x0, kwargs):
     if kwargs['norm_method'] == 'exp':
         x0[x0 <= kwargs['exp_trd'][0]] = kwargs['exp_trd'][0]
         x0[x0 >= kwargs['exp_trd'][1]] = kwargs['exp_trd'][1]
-        x0 = np.log10(x0 + 1);
-        x0 = np.divide((x0 - x0.mean()), x0.std());
+        x0 = np.log10(x0 + 1)
+        x0 = np.divide((x0 - x0.mean()), x0.std())
         trd = kwargs['exp_ftr']
-        x0[x0 <= -trd] = -trd;
-        x0[x0 >= trd] = trd;
+        x0[x0 <= -trd] = -trd
+        x0[x0 >= trd] = trd
         x0 = x0 / trd
         x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
-    elif kwargs['norm_method'] == '01':
+    elif kwargs['norm_method'] == '11':
         trd = kwargs['trd']
         x0[x0 >= trd] = trd
-        x0 = x0 / x0.max()
+        x0 = (x0 - x0.min()) / (x0.max() - x0.min())
         x0 = (x0 - 0.5) * 2
         x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
     elif kwargs['norm_method'] == '00':
+        x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
+    return
+
+
+def norm_x0(x0, norm_method, exp_trd, exp_ftr, trd):
+    if norm_method == 'exp':
+        x0[x0 <= exp_trd[0]] = exp_trd[0]
+        x0[x0 >= exp_trd[1]] = exp_trd[1]
+        x0 = np.log10(x0 + 1)
+        x0 = np.divide((x0 - x0.mean()), x0.std())
+        x0[x0 <= -exp_ftr] = -exp_ftr
+        x0[x0 >= exp_ftr] = exp_ftr
+        x0 = x0 / exp_ftr
+        x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
+    elif norm_method == '11':
+        x0[x0 >= trd] = trd
+        #x0 = x0 / x0.max()
+        x0 = (x0 - x0.min()) / (x0.max() - x0.min())
+        x0 = (x0 - 0.5) * 2
+        x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
+    elif norm_method == '00':
         x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
     return x0
 
@@ -250,34 +271,52 @@ def main_assemble_volume(x0, kwargs):
     dz, dx, dy = kwargs['assemble_params']['dx_shape']
     sz, sx, sy = kwargs['assemble_params']['sx_shape']
     w = get_weight(kwargs['assemble_params']['weight_shape'], method='cross', C=kwargs['assemble_params']['C'])
-    zrange = range(0, x0.shape[2], sz)[kwargs['assemble_params']['zrange_start']:kwargs['assemble_params']['zrange_end']]
-    xrange = range(0, x0.shape[3], sx)[kwargs['assemble_params']['xrange_start']:kwargs['assemble_params']['xrange_end']]
-    yrange = range(0, x0.shape[4], sy)[kwargs['assemble_params']['yrange_start']:kwargs['assemble_params']['yrange_end']]
+    zrange = range(0, x0[0].shape[2], sz)[kwargs['assemble_params']['zrange_start']:kwargs['assemble_params']['zrange_end']]
+    xrange = range(0, x0[0].shape[3], sx)[kwargs['assemble_params']['xrange_start']:kwargs['assemble_params']['xrange_end']]
+    yrange = range(0, x0[0].shape[4], sy)[kwargs['assemble_params']['yrange_start']:kwargs['assemble_params']['yrange_end']]
 
     recreate_volume_folder(destination + '/cycout/')  # DELETE and recreate the folder
-    test_microscopy_volumne(kwargs, dx, dy, dz, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination + '/cycout/')
+    test_over_volumne(kwargs, dx, dy, dz, zrange=zrange, xrange=xrange, yrange=yrange, destination=destination + '/cycout/')
     assemble_microscopy_volumne(kwargs, w, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + '/cycout/xy/')
     assemble_microscopy_volumne(kwargs, w, zrange=zrange, xrange=xrange, yrange=yrange, source=destination + '/cycout/ori/')
 
 
 if __name__ == '__main__':
-    option='womac4'
-    x0, kwargs = get_args(option=option, config_name='test/config.yaml')
+    option = "DPM4X"#"BraTSReg"#'Dayu1'
+    kwargs = get_args(option=option, config_name='test/config.yaml')
+    print(kwargs)
+
     destination = '/media/ExtHDD01/Dataset/paired_images/' + kwargs["dataset"]
     if option == 'womac4':
         gpu = False
     else:
         gpu = True
-    model, upsample = get_model(kwargs, gpu)
+    gpu = True
+    eval = False
     expand = False
     tilt = False
+    masking = False
     mc = 1  # monte carlo inference, mean over N times
 
+    model, upsample = get_model(kwargs, gpu)
+
+    # Data
+    x0 = get_data(kwargs)
+    for i in range(len(x0)):
+        x0[i] = norm_x0(x0[i], kwargs['norm_method'][i],
+                        kwargs['exp_trd'][i], kwargs['exp_ftr'][i], kwargs['trd'][i])
+
+    # BRAIN
+    #x0 = np.transpose(x0, (1, 2, 0))
+    #x0 = x0[:, :, ::4]
+
     # single test
-    x0 = norm_x0(x0, kwargs)
     #x0 = torch.flip(x0, (2,)) # flip
     out, patch = test_IsoScope(x0, model, **kwargs)
     out = out.mean(axis=3)
+
+    if masking:
+        out[patch == -1] = -1
 
     # out = out[::-1, :, :] # flip
     # save single output
